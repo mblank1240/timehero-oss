@@ -10,7 +10,7 @@ Running TimeHero in production. Setting it up is `docs/AZURE-SETUP.md` and
 | Did last night's jobs run? | **Admin → Jobs**: every run, its result, and a "not run on schedule" notice for any job that has missed its slot |
 | Why did a job fail? | The run's row in Admin → Jobs, then the **Scheduled jobs** workflow run in GitHub Actions |
 | Is the site up? | `https://<address>/api/health`, and the `-site-up` availability test in Application Insights |
-| Why is a page erroring? | Application Insights → Failures, or App Service → Log stream |
+| Why is a page erroring? | Application Insights → Failures, or App Service → Log stream. Older console, HTTP and database logs are in the `-logs` Log Analytics workspace (`AppServiceConsoleLogs`, `AppServiceHTTPLogs`, `PostgreSQLLogs`) |
 | Did a deploy go out? | The **Deploy** workflow in GitHub Actions |
 | Did notifications go out? | Administration → Notifications counts failed deliveries |
 
@@ -43,7 +43,32 @@ noticed, while a job that silently *stops* produces nothing at all.
    a missed day is recovered by running that date. Run the dates in order,
    oldest first: **Admin → Jobs** has a date on each job, or use
    **Actions → Scheduled jobs → Run workflow** with a date. Running a date
-   twice changes nothing.
+   twice changes nothing. A date may reach back two years and no further
+   ahead than tomorrow; anything outside that is refused as a likely typo.
+
+   Two things catch up on their own once the jobs are running again:
+
+   - **The benefit-year rollover.** The first run after the year's first day
+     does the rollover if no run has yet, with the same figures it would have
+     had on the day. Its run log says `caughtUp: true`. Only the current
+     year's rollover is caught up this way; one missed in an earlier year is
+     run by hand for that year's first day.
+   - **The last pay period of a year.** The rollover settles it before it
+     closes the year (`finalAccrualsSettled` in its run log). If the run log
+     shows `finalAccrualsUntracked` above zero, the ledger had nothing at all
+     for those employees in the closing year — usually an install that went
+     live after it — and nothing was written for them; decide whether an
+     adjustment is owed.
+
+## A year began without a rollover
+
+`/api/health/jobs` and Admin → Jobs also flag `benefit-year-rollover` when the
+current benefit year is more than a day old and no run has rolled it over —
+which a daily heartbeat cannot show, because the job succeeds every day. Since
+the job catches up on its own, this means it is not running, or every run is
+failing: read the error on its latest row in Admin → Jobs, fix the cause (a
+failing run names the employees and leave types it could not finish), and run
+it again. Everyone already done is skipped.
 
 ## Restoring the database
 
@@ -120,8 +145,20 @@ app after changing one**.
 Every merge to `main` deploys once CI passes, after a reviewer approves it
 if the `production` environment requires one. Migrations run first.
 
-To roll back, **revert the commit on `main`**. That gives a normal deploy of
-the previous code. Migrations only go forward, which is why each one must
-work with the release before it (see "Migrations run from the deploy, before
-the code" in `docs/DECISIONS.md`). A migration that has to be undone gets a
-new migration.
+### Rolling back a deploy
+
+There are no deployment slots: a deploy replaces the running code in place,
+and if its smoke test fails, **the failed release is what is live**. The
+Deploy run fails with an error saying so.
+
+- **Fastest:** in **Actions → Deploy**, open the last run that succeeded and
+  choose **Re-run all jobs**. It deploys the commit that run deployed (its
+  `head_sha`), so the previous code is back in a few minutes. Its migrate
+  step finds nothing to do.
+- **Then, or instead:** **revert the commit on `main`**. That gives a normal
+  deploy of the previous code, and keeps `main` matching what is live.
+
+Migrations only go forward, which is why each one must work with the release
+before it (see "Migrations run from the deploy, before the code" in
+`docs/DECISIONS.md`): the old code runs fine on the new schema. A migration
+that has to be undone gets a new migration.

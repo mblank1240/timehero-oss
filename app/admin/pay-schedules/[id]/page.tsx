@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 
 import { PayScheduleFields } from '@/components/config-fields'
 import { ConfigForm, SubmitButton } from '@/components/form'
+import { requireAdmin } from '@/lib/authz'
 import { savePaySchedule } from '@/lib/config/actions'
 import { db } from '@/lib/db'
 
@@ -11,6 +12,7 @@ export const metadata = { title: 'Edit pay schedule · TimeHero' }
 export default async function EditPaySchedulePage({
   params,
 }: PageProps<'/admin/pay-schedules/[id]'>) {
+  await requireAdmin()
   const { id } = await params
   const schedule = await db.paySchedule.findUnique({ where: { id } })
   if (!schedule) notFound()

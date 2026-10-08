@@ -3,12 +3,14 @@ import { notFound } from 'next/navigation'
 
 import { LeaveTypeFields } from '@/components/config-fields'
 import { ConfigForm, SubmitButton } from '@/components/form'
+import { requireAdmin } from '@/lib/authz'
 import { saveLeaveType } from '@/lib/config/actions'
 import { db } from '@/lib/db'
 
 export const metadata = { title: 'Edit leave type · TimeHero' }
 
 export default async function EditLeaveTypePage({ params }: PageProps<'/admin/leave-types/[id]'>) {
+  await requireAdmin()
   const { id } = await params
   const type = await db.leaveType.findUnique({ where: { id } })
   if (!type) notFound()

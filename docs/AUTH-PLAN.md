@@ -24,7 +24,7 @@ variables; the sign-in page offers whichever are on.
 | Method | Turned on by | Notes |
 |---|---|---|
 | Microsoft | `AUTH_MICROSOFT_ENTRA_ID_*` | As before, now through the `Identity` table. |
-| Google | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | Links only addresses Google vouches for (`email_verified`). |
+| Google | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | Links by address only with a Google Workspace registered, and only addresses Google vouches for (`email_verified`). |
 | Emailed link | `AUTH_EMAIL_LINKS=true` + outgoing mail + a sending address set by an administrator | `lib/sign-in-links.ts`. Without an address the option is hidden and requests are refused. |
 | Development bypass | `DEV_AUTH_BYPASS=true` | Refused in production, as before. |
 
@@ -48,7 +48,9 @@ unlink.
 
 A multi-tenant Microsoft app with no directory registered never links by
 email: any Microsoft account anywhere could claim any address (the "nOAuth"
-mistake).
+mistake). Nor does Google without a Workspace registered: anyone can make a
+personal Google account on a work address, and it would outlive the job.
+Without one, Google sign-in works only for an account already linked.
 
 **Registering the organization — Microsoft.** Admin → Directory → *Connect
 Microsoft 365* sends an administrator to Microsoft's admin-consent page. The
@@ -68,7 +70,11 @@ really granted — records a `DirectoryConnection`, and runs a first sync.
   time, which FLSA forbids.
 - A linked account later **disabled** in the directory flags its employee for
   review. Nobody is deactivated automatically: leaving is an HR decision with
-  a termination date.
+  a termination date. But the employee cannot sign in by any route — Microsoft,
+  Google or emailed link — and an open session ends, while any linked account
+  is recorded as disabled (`Identity.directoryAccountEnabled = false`).
+  Unlinking that account on the employee's page, or a sync that sees it
+  enabled again, lets them back in.
 - Guests, disabled accounts nobody holds (shared mailboxes) and addresses
   outside the domains are skipped and counted. Domains are re-read each sync.
 
@@ -76,8 +82,11 @@ really granted — records a `DirectoryConnection`, and runs a first sync.
 and answered the same way either way. Only an employee who may sign in gets a
 token: 32 random bytes, stored as a SHA-256 hash, valid 15 minutes, spent once
 by a conditional update so two clicks cannot both succeed. Five requests an
-hour per address, twenty per IP. The link opens a page with a button, because
-mail scanners follow links and would spend a token on a GET.
+hour per address, twenty per IP, and a hundred links mailed an hour in all
+(the constants in `lib/sign-in-links.ts`). The message is sent after the
+response (`after()`), so a real address is not answered more slowly than an
+unknown one. The link opens a page with a button, because mail scanners follow
+links and would spend a token on a GET.
 
 **Outgoing mail** (`lib/mail/`): `smtp` (nodemailer), `graph` (from a shared
 mailbox with the Entra app's `Mail.Send`), and `file`/`console` for
@@ -102,9 +111,13 @@ contact. `docs/ENTRA-SETUP.md` now asks the tenant owner for the two
 application permissions this needs (`User.Read.All`, and `Mail.Send` scoped to
 the shared mailbox).
 
-The per-IP limit reads the first `X-Forwarded-For` address, which a client can
-set; behind Azure's front end that should be replaced with the address the
-platform appends. The per-address limit does not depend on it.
+The per-IP limit reads the right-most `X-Forwarded-For` address — the one the
+proxy in front of the app appended (App Service adds a port, which is
+dropped); the entries before it are the client's to choose. A request with no
+usable address shares one limit with every other such request. Behind more
+than one proxy of your own, the right-most entry is your outer proxy's
+address, so the per-IP limit becomes a shared one; the per-address and overall
+limits do not depend on it.
 
 ## Planned: Google Workspace as a directory
 

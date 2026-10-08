@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 import { NOTIFICATION_TYPES } from './channels'
+import { isAllowedPushEndpoint } from './push-endpoint'
 
 /**
  * Validation for the notification settings: the organization's (an
@@ -83,7 +84,7 @@ export const pushSubscriptionInput = z.object({
   endpoint: z
     .url()
     .max(2048)
-    .refine((u) => u.startsWith('https://'), 'A push endpoint is always https.'),
+    .refine(isAllowedPushEndpoint, 'That is not a known Web Push service.'),
   keys: z.object({
     p256dh: z.string().min(1).max(512),
     auth: z.string().min(1).max(512),

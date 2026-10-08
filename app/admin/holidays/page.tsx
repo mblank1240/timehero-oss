@@ -1,21 +1,26 @@
 import { ActionButton, ConfigForm, Field, SubmitButton } from '@/components/form'
+import { todayIn } from '@/lib/accrual/dates'
+import { requireAdmin } from '@/lib/authz'
 import { createHoliday, deleteHoliday } from '@/lib/config/actions'
 import { db } from '@/lib/db'
 import { formatDuration } from '@/lib/duration'
+import { orgSettingsOrThrow } from '@/lib/ledger/policies'
 
 export const metadata = { title: 'Holidays · TimeHero' }
 
 export default async function HolidaysPage() {
+  await requireAdmin()
   const [holidays, settings] = await Promise.all([
     db.holiday.findMany({ orderBy: { date: 'asc' } }),
-    db.orgSettings.findUnique({ where: { id: 1 } }),
+    orgSettingsOrThrow(),
   ])
 
-  const unit = settings?.displayUnit ?? 'DAYS'
-  const today = new Date().toISOString().slice(0, 10)
+  // The organization's today, not the server's: holidays are DATEs, and a UTC
+  // evening is already tomorrow.
+  const today = todayIn(settings.timezone)
 
-  const upcoming = holidays.filter((h) => h.date.toISOString().slice(0, 10) >= today)
-  const past = holidays.filter((h) => h.date.toISOString().slice(0, 10) < today)
+  const upcoming = holidays.filter((h) => h.date >= today)
+  const past = holidays.filter((h) => h.date < today)
 
   return (
     <div className="mx-auto max-w-2xl space-y-10">
@@ -29,13 +34,13 @@ export default async function HolidaysPage() {
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Upcoming</h2>
-        <HolidayList holidays={upcoming} unit={unit} emptyMessage="None scheduled." />
+        <HolidayList holidays={upcoming} emptyMessage="None scheduled." />
       </section>
 
       {past.length > 0 && (
         <section className="space-y-3">
           <h2 className="text-lg font-semibold">Past</h2>
-          <HolidayList holidays={past} unit={unit} emptyMessage="None." />
+          <HolidayList holidays={past} emptyMessage="None." />
         </section>
       )}
 
@@ -80,11 +85,9 @@ export default async function HolidaysPage() {
 
 function HolidayList({
   holidays,
-  unit,
   emptyMessage,
 }: {
   holidays: { id: string; date: Date; name: string; minutes: number }[]
-  unit: 'HOURS' | 'DAYS'
   emptyMessage: string
 }) {
   if (holidays.length === 0) {
@@ -101,7 +104,8 @@ function HolidayList({
           </div>
           <div className="flex items-center gap-3">
             <span className="text-muted">
-              {formatDuration(h.minutes, { unit, minutesPerDay: 480 })}
+              {/* Hours: a holiday is the same length for everyone, and "a day" is not. */}
+              {formatDuration(h.minutes, { unit: 'HOURS', minutesPerDay: 1 })}
             </span>
             <ActionButton
               action={deleteHoliday.bind(null, h.id)}

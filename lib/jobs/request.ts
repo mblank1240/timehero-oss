@@ -8,6 +8,7 @@
 
 import { timingSafeEqual } from 'node:crypto'
 
+import { addDays, todayIn } from '@/lib/accrual/dates'
 import { env } from '@/lib/env'
 
 export type Authorization = { ok: true } | { ok: false; status: 401 | 503; message: string }
@@ -60,17 +61,38 @@ function secretsMatch(presented: string, expected: string): boolean {
 }
 
 /**
- * The date a job run is acting on. Defaults to today in UTC.
+ * How far from today an explicit job date may reach. A safety bound on input,
+ * not policy: nothing an organization configures depends on it.
+ *
+ * Behind: two years, so a missed day — or a missed rollover into last year —
+ * can always be backfilled, while a typo such as `2002` for `2026` cannot
+ * replay decades of accrual.
+ *
+ * Ahead: one day, which is "today" somewhere east of the server. No job has
+ * any business running for a date that has not arrived — a rollover run early
+ * would close a year that is still going on, on a ledger that is append-only —
+ * and `generate-pay-periods` builds its horizon from the date, one row at a
+ * time in a single transaction, so a far-future date would never finish.
+ */
+export const JOB_DATE_MAX_DAYS_BEHIND = 731
+export const JOB_DATE_MAX_DAYS_AHEAD = 1
+
+/**
+ * The date a job run is acting on. Defaults to today in `timeZone` — the
+ * organization's, which the caller passes (`OrgSettings.timezone`); UTC when it
+ * does not, which is right for the scheduled run at 07:00 UTC in the Americas
+ * and wrong for anywhere the date has already changed.
  *
  * Every job takes one so that a late run, a backfill and a test are the same
  * code path. Leave dates are DATE columns, so the value is always a UTC
  * midnight and never carries a time of day.
  */
-export function jobDate(input?: string | null): Date {
-  if (!input) {
-    const now = new Date()
-    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
-  }
+export function jobDate(
+  input?: string | null,
+  opts: { timeZone?: string; now?: Date } = {},
+): Date {
+  const today = todayIn(opts.timeZone ?? 'UTC', opts.now)
+  if (!input) return today
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input)) {
     throw new Error(`date must be YYYY-MM-DD, got "${input}"`)
@@ -86,5 +108,18 @@ export function jobDate(input?: string | null): Date {
     throw new Error(`date is not a real date: "${input}"`)
   }
 
+  assertJobDateInWindow(date, today)
   return date
+}
+
+/** Refuses a date outside the window above, measured from `today`. */
+export function assertJobDateInWindow(date: Date, today: Date): void {
+  const earliest = addDays(today, -JOB_DATE_MAX_DAYS_BEHIND)
+  const latest = addDays(today, JOB_DATE_MAX_DAYS_AHEAD)
+  if (date < earliest || date > latest) {
+    const iso = (d: Date) => d.toISOString().slice(0, 10)
+    throw new Error(
+      `date ${iso(date)} is outside the range a job may run for (${iso(earliest)} to ${iso(latest)}).`,
+    )
+  }
 }

@@ -5,7 +5,8 @@
  * (`MAIL_TRANSPORT`). A church on Microsoft 365 sends through Graph from a
  * shared mailbox; anyone else uses SMTP, which every mail provider speaks.
  * Development writes each message to a file instead, which is also how the
- * end-to-end tests read a sign-in link.
+ * end-to-end tests read a sign-in link; lib/env.ts refuses that, and
+ * `console`, in production.
  *
  * Who it is from is not configuration but an administrator's setting
  * (`OrgSettings.mailFromAddress`): an organization gets email only from an
@@ -19,6 +20,9 @@ import path from 'node:path'
 import { env, entraIssuerTenant } from '@/lib/env'
 
 export type Mail = { to: string; subject: string; text: string }
+
+/** How long an SMTP server may take to connect, greet, or answer a command. */
+const SMTP_TIMEOUT_MS = 30_000
 
 export class MailNotConfiguredError extends Error {
   constructor(what = 'Outgoing mail is not configured (MAIL_TRANSPORT).') {
@@ -60,7 +64,14 @@ export async function sendMail(mail: Mail): Promise<void> {
   switch (mailTransport()) {
     case 'smtp': {
       const { createTransport } = await import('nodemailer')
-      await createTransport(env.SMTP_URL).sendMail({
+      // The URL carries the server and credentials; the timeouts keep a mail
+      // server that stops answering from holding up the notification run.
+      await createTransport({
+        url: env.SMTP_URL,
+        connectionTimeout: SMTP_TIMEOUT_MS,
+        greetingTimeout: SMTP_TIMEOUT_MS,
+        socketTimeout: SMTP_TIMEOUT_MS,
+      }).sendMail({
         from,
         to: mail.to,
         subject: mail.subject,

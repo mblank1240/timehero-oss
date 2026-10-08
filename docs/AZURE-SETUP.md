@@ -25,10 +25,12 @@ address, which works the same way for any organization deploying its own copy.
 > | Resource providers registered | `Microsoft.Web`, `Microsoft.DBforPostgreSQL`, `Microsoft.KeyVault`, `Microsoft.Insights`, `Microsoft.OperationalInsights`, `Microsoft.ManagedIdentity`, `Microsoft.AlertsManagement` (most are already registered on any subscription that has used them) |
 >
 > **Why Owner and not Contributor:** the deployment grants the app its own
-> identity read access to its Key Vault, and grants the GitHub deploy
-> identity rights over the app. Creating those role assignments needs Owner,
-> or Contributor plus Role Based Access Control Administrator. The access is
-> limited to this resource group either way.
+> identity read access to its Key Vault, grants the GitHub deploy identity
+> rights over the app, defines a narrow custom role (firewall rules on the
+> database server, nothing else) for that identity, and puts a delete lock on
+> the Key Vault. Role assignments, role definitions and locks all need Owner,
+> or Contributor plus User Access Administrator. The access is limited to
+> this resource group either way.
 >
 > **What goes in it:** one App Service plan (Basic B1, Linux), one web app,
 > one PostgreSQL Flexible Server (Burstable B1ms, 32 GB, 35-day
@@ -216,7 +218,67 @@ link use the custom domain. The managed certificate renews itself.
   private endpoint is more isolated, but it costs more, and migrations would
   then need a self-hosted runner inside it. See "The database has a public
   endpoint behind a firewall" in `docs/DECISIONS.md`.
-- **The app connects as the database administrator.** A separate
+- **The app connects as the database administrator** by default. A separate
   least-privilege role is a sensible hardening step, done in SQL after the
-  first deploy. The template cannot create database roles.
+  first deploy (below). The template cannot create database roles.
+- **No delete lock on the database server.** A lock on the server covers its
+  firewall rules too, and the deploy deletes the rule it opens for the
+  migration. The Key Vault is locked; the database is protected by its
+  geo-redundant backups (`docs/RUNBOOK.md`, "Restoring the database").
+
+### Running the app as a least-privilege database role
+
+Migrations need the administrator; the running app only reads and writes
+rows. Giving the app its own role means a flaw in the app cannot drop a
+table, alter the ledger's append-only trigger, or read another database.
+`DATABASE-URL` stays the administrator — the deploy workflow migrates with
+it, and the template rewrites it on every run — and the app moves to a
+second secret.
+
+1. Connect as the administrator (the URL is in `DATABASE-URL`; open the
+   firewall to yourself first, as in `docs/RUNBOOK.md`) and create the role:
+
+   ```sql
+   CREATE ROLE timehero_app LOGIN PASSWORD '<openssl rand -hex 24>';
+   GRANT CONNECT ON DATABASE timehero TO timehero_app;
+   GRANT USAGE ON SCHEMA public TO timehero_app;
+   GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO timehero_app;
+   GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO timehero_app;
+   -- Tables later migrations create, as the administrator, are covered too:
+   ALTER DEFAULT PRIVILEGES FOR ROLE timehero IN SCHEMA public
+     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO timehero_app;
+   ALTER DEFAULT PRIVILEGES FOR ROLE timehero IN SCHEMA public
+     GRANT USAGE, SELECT ON SEQUENCES TO timehero_app;
+   ```
+
+   (`timehero` is `postgresAdminLogin`; use yours if you changed it.)
+
+2. Store its URL in Key Vault, the same shape as `DATABASE-URL`:
+
+   ```bash
+   az keyvault secret set --vault-name $VAULT --name APP-DATABASE-URL \
+     --value "postgresql://timehero_app:<password>@<postgresHost output>:5432/timehero?sslmode=require"
+   ```
+
+3. Add `param appDatabaseUrlSecret = 'APP-DATABASE-URL'` to your
+   `.bicepparam`, re-run the deployment (with the same
+   `POSTGRES_ADMIN_PASSWORD`), and restart the app. Sign in and open a page
+   or two; a missing grant shows as `permission denied` in the app logs. To
+   back out, remove the parameter and redeploy.
+
+### Upgrading an earlier deployment
+
+Templates before this one gave the deploy identity **Contributor** on the
+database server. A redeploy adds the narrower firewall role but does not
+remove an assignment it no longer declares, so remove it by hand once the
+next deploy has succeeded with the new role:
+
+```bash
+az role assignment delete --assignee <deployClientId output> --role Contributor \
+  --scope "$(az postgres flexible-server show -g rg-timehero -n <postgresServerName output> --query id -o tsv)"
+```
+
+If that deploy instead fails at "Open the database firewall" with an
+authorization error, the custom role is missing an action the CLI needs: the
+error names it. Add it to `firewallOperator` in `infra/main.bicep`.
 - **It never touches the secrets in step 3.** A redeploy cannot rotate them.

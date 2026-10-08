@@ -403,3 +403,13 @@ The seed exists to make sample data. `npm run setup` writes the same configurati
 ## The public repository is an export, not this repository's history
 
 The original organization's files — its configuration file, Azure parameters and private docs — stay in its private repository, whose deploy identity is federated to it by name. The public repository is produced by an export script from `HEAD` as one fresh commit — the history contains the organization's name and addresses — and refuses to export if an identifier survives in a shared file.
+
+## The rollover catches up, and closes the year's accrual itself
+
+A rollover that acted only on the benefit year's first day would, if that one run were missed, never happen — and every later run would report a successful skip, keeping the health check green. So any run in the year acts if the run log has no successful rollover into it. The figures do not depend on when it runs (closing balance as of the boundary, entries dated on it), so a late rollover and an on-time one write the same rows. It reaches back one boundary only; older ones are a deliberate run for that date.
+
+The year's last pay period is the one accrual a missed run can lose — inside a year the next period's cumulative target catches up, but the last period has no next one. It is settled by the rollover, in the same transaction and before the closing balance is read, rather than by the accrual job: an accrual written into a closed year *after* its rollover leaves the forfeit and carry stale, and putting both in one job is the only ordering that cannot race. A year the ledger never reached (an install that went live after it) is reported, not settled, since the formula would grant a whole year's allotment into it.
+
+## Late approvals are refused, not written
+
+Three things can change between submission and final approval that a balance check on the requested days alone does not see: the benefit year closes, a lot the request would spend expires and is forfeited, or — for overtime — the comp it would bank expires. Each is refused at final approval with a message telling the approver to deny it and, where time is owed, to have an administrator post an adjustment. Writing them anyway would put entries into a closed year, spend forfeited time twice, or bank time that is forfeited the same night; all three are corrections an administrator can make deliberately but the approval flow should not make silently.

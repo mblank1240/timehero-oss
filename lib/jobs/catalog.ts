@@ -36,7 +36,7 @@ export const JOB_DESCRIPTIONS: Record<JobName, string> = {
   'accrue-pay-period':
     'Daily. Grants any lump allotments that have come due, and accrues every pay period ending on the date.',
   'benefit-year-rollover':
-    'Daily, but does nothing except on the first day of the benefit year, when it forfeits closing balances, re-grants what is carried, and posts the new year’s allotments.',
+    'Daily, but acts once a year: on the first day of the benefit year — or the first run after it, if that day was missed — it settles the closing year’s last pay period, forfeits closing balances, re-grants what is carried, and posts the new year’s allotments.',
   'create-timesheets':
     'Daily. Creates a timesheet for every hourly employee in each pay period open on the date.',
   'expire-lots': 'Daily. Forfeits whatever is left of any grant that has passed its expiry date.',

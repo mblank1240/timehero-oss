@@ -1,3 +1,4 @@
+import { requireAdmin } from '@/lib/authz'
 import { db } from '@/lib/db'
 import { runJobNow } from '@/lib/jobs/actions'
 import { JOB_DESCRIPTIONS, JOB_NAMES } from '@/lib/jobs/catalog'
@@ -17,6 +18,7 @@ export const metadata = { title: 'Jobs · TimeHero' }
  * double-grant by being pressed twice.
  */
 export default async function JobsPage() {
+  await requireAdmin()
   const [runs, overdue] = await Promise.all([
     db.jobRun.findMany({
       orderBy: { startedAt: 'desc' },

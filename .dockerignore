@@ -12,3 +12,8 @@ coverage
 .env*
 !.env.example
 !.env.docker.example
+# An organization's employees and configuration stay out of the image. The
+# tools service mounts both at run time (docker-compose.yml).
+import
+prisma/config/*.json
+!prisma/config/example.json

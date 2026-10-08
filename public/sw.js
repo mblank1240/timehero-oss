@@ -26,7 +26,18 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  const url = new URL(event.notification.data?.url || '/', self.location.origin).href
+  // The payload names a path in this app. Anything that resolves elsewhere —
+  // `//other.example`, `https://…` — opens the notifications page instead.
+  let target
+  try {
+    target = new URL(event.notification.data?.url || '/', self.location.origin)
+  } catch {
+    target = null
+  }
+  const url =
+    target && target.origin === self.location.origin
+      ? target.href
+      : new URL('/notifications', self.location.origin).href
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {

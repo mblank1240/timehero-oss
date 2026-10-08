@@ -614,6 +614,7 @@ model LedgerEntry {
   @@index([leaveTypeId, effectiveDate])
   @@index([expiresOn])
   @@index([jobRunId])
+  @@index([createdById])
   @@map("ledger_entries")
 }
 
@@ -765,6 +766,7 @@ model ApprovalStep {
   @@unique([overtimeLogId, step])
   @@unique([timesheetId, step])
   @@index([approverId, status])
+  @@index([decidedById])
   @@map("approval_steps")
 }
 
@@ -913,6 +915,7 @@ model TimeEntry {
 
   @@index([timesheetId, date])
   @@index([leaveRequestId])
+  @@index([leaveTypeId])
   @@map("time_entries")
 }
 

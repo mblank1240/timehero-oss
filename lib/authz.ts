@@ -1,10 +1,12 @@
 import { redirect } from 'next/navigation'
+import { cache } from 'react'
 
 import type { Role } from '@/lib/employees/schema'
 import { canReadReports } from '@/lib/roles'
 
 import { auth } from './auth'
 import { db } from './db'
+import { disabledInDirectory } from './directory/link'
 import { resolveEmployeeForSignIn } from './sign-in'
 
 export { canReadReports }
@@ -29,13 +31,17 @@ export type CurrentUser = {
 
 /**
  * The single source of truth for "who is asking". Reads the employee fresh on
- * every call rather than trusting the session, so a deactivated account or a
- * revoked admin role takes effect immediately instead of at token expiry.
+ * every request rather than trusting the session, so a deactivated account, an
+ * account the directory sync saw disabled, or a revoked admin role takes
+ * effect immediately instead of at token expiry.
  *
  * Returns null when there is no valid user; callers that require one should
  * use `requireUser` / `requireAdmin`.
+ *
+ * Memoized per request with React `cache()`: a layout and its page both call a
+ * guard, and the second call costs nothing. Each new request reads afresh.
  */
-export async function getCurrentUser(): Promise<CurrentUser | null> {
+export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   const session = await auth()
   const employeeId = session?.user?.employeeId
   if (!employeeId) return null
@@ -53,15 +59,22 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
       standardMinutesPerDay: true,
       isActive: true,
       terminationDate: true,
+      identities: { select: { directoryAccountEnabled: true } },
     },
   })
 
   if (!employee) return null
   if (!resolveEmployeeForSignIn(employee, new Date()).ok) return null
+  if (disabledInDirectory(employee.identities)) return null
 
-  const { isActive: _isActive, terminationDate: _terminationDate, ...user } = employee
+  const {
+    isActive: _isActive,
+    terminationDate: _terminationDate,
+    identities: _identities,
+    ...user
+  } = employee
   return user
-}
+})
 
 /** Redirects to sign-in when there is no valid session. */
 export async function requireUser(): Promise<CurrentUser> {

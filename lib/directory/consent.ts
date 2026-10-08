@@ -34,16 +34,27 @@ export function statesMatch(a: string | undefined | null, b: string | undefined 
   return x.length === y.length && timingSafeEqual(x, y)
 }
 
+const TENANT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 /**
  * A single-tenant app signs people in from one tenant only, so a directory
  * from any other could never be used to sign anyone in. Null when fine.
+ *
+ * The issuer may name its tenant by id or by one of its domains. Microsoft
+ * answers consent with the id, so a domain can only be confirmed against the
+ * tenant's verified domains, when the caller has read them; until then a
+ * domain-form issuer is refused rather than assumed to match.
  */
-export function tenantMismatch(tenant: string): string | null {
-  const issuer = entraIssuerTenant()
+export function tenantMismatch(
+  tenant: string,
+  opts: { domains?: readonly string[]; issuer?: string | null } = {},
+): string | null {
+  const issuer = opts.issuer !== undefined ? opts.issuer : entraIssuerTenant()
   if (!issuer || MULTI_TENANT_ISSUERS.includes(issuer)) return null
-  // A single-tenant issuer may name the tenant by id or by a domain.
-  if (/^[0-9a-f-]{36}$/i.test(issuer) && issuer !== tenant.toLowerCase()) {
-    return `This deployment signs people in from tenant ${issuer}, but consent was granted in ${tenant}.`
+  const mismatch = `This deployment signs people in from tenant ${issuer}, but consent was granted in ${tenant}.`
+  if (TENANT_ID.test(issuer)) return issuer === tenant.toLowerCase() ? null : mismatch
+  if (!opts.domains) {
+    return `This deployment names its Microsoft tenant as ${issuer}, which cannot be checked against the tenant that granted consent (${tenant}). Set AUTH_MICROSOFT_ENTRA_ID_ISSUER to use the tenant id instead.`
   }
-  return null
+  return opts.domains.some((d) => d.toLowerCase() === issuer) ? null : mismatch
 }

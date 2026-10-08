@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import { decideExternalSignIn, type ExternalSignIn } from '@/lib/directory/link'
+import {
+  decideExternalSignIn,
+  disabledInDirectory,
+  type ExternalSignIn,
+} from '@/lib/directory/link'
 import {
   employeeFromDirectoryUser,
   planDirectorySync,
@@ -122,6 +126,26 @@ describe('decideExternalSignIn', () => {
       ).toEqual({ kind: 'DENY', reason: 'WRONG_TENANT' })
     })
 
+    it('links nobody by address without a Workspace registered — a personal account on a work address, say', () => {
+      expect(
+        decide(google({ tenant: null }), { connection: null, emailEmployeeId: 'e1' }),
+      ).toEqual({ kind: 'DENY', reason: 'UNTRUSTED_TENANT' })
+      expect(decide(google(), { connection: null, emailEmployeeId: 'e1' })).toEqual({
+        kind: 'DENY',
+        reason: 'UNTRUSTED_TENANT',
+      })
+      // An account bound earlier is still that employee.
+      expect(decide(google({ tenant: null }), { connection: null, boundEmployeeId: 'e1' })).toEqual(
+        { kind: 'EXISTING', employeeId: 'e1' },
+      )
+    })
+
+    it('needs the address itself in a registered domain, not only the Workspace', () => {
+      expect(
+        decide(google({ email: 'sam@gmail.com' }), { connection: workspace, emailEmployeeId: 'e1' }),
+      ).toEqual({ kind: 'DENY', reason: 'NOT_LINKED' })
+    })
+
     it('never links an address Google does not vouch for, and never provisions', () => {
       expect(
         decide(google({ emailVerified: false }), { connection: null, emailEmployeeId: 'e1' }).kind,
@@ -130,6 +154,17 @@ describe('decideExternalSignIn', () => {
         'DENY',
       )
     })
+  })
+})
+
+describe('disabledInDirectory', () => {
+  it('is true once the sync has seen any linked account disabled', () => {
+    expect(disabledInDirectory([])).toBe(false)
+    expect(disabledInDirectory([{ directoryAccountEnabled: null }])).toBe(false)
+    expect(disabledInDirectory([{ directoryAccountEnabled: true }])).toBe(false)
+    expect(
+      disabledInDirectory([{ directoryAccountEnabled: true }, { directoryAccountEnabled: false }]),
+    ).toBe(true)
   })
 })
 

@@ -170,3 +170,47 @@ function applyCeiling(
 export function periodKeyFor(benefitYear: BenefitYear, periodNumber: number): string {
   return `${benefitYear.label}-PP${String(periodNumber).padStart(2, '0')}`
 }
+
+/**
+ * What it takes to finish a benefit year's per-pay-period accrual, read by
+ * the rollover just before it closes the year.
+ *
+ * - `complete` — nothing is owed. The usual answer: the last period was
+ *   accrued on the day it closed.
+ * - `settled` — the accrual for the year's last period, which was never
+ *   written. Within a year a missed run costs nothing, because the next
+ *   period's cumulative target catches it up; the *last* period has no next
+ *   period in the same year, so a missed run on its end date would otherwise
+ *   be lost — and the rollover, reading the closing balance without it, would
+ *   then be stale for good.
+ * - `untracked` — the formula says something is owed, but the ledger has no
+ *   entry at all for this employee and type dated in the year. That is what
+ *   a system that was not yet live looks like (an install, or an import cut
+ *   over, after the year ended), and granting a whole year's allotment into
+ *   a closed year on that evidence would be a windfall. So it is reported,
+ *   not written: an administrator decides.
+ */
+export type YearSettlement =
+  | { status: 'complete' }
+  | { status: 'settled'; entry: ProposedEntry }
+  | { status: 'untracked'; minutes: number }
+
+export function settleBenefitYear(args: Omit<AccruePayPeriodArgs, 'period'>): YearSettlement {
+  const final = benefitYearPeriods(args.schedule, args.benefitYear).at(-1)
+  if (!final) return { status: 'complete' }
+
+  // The cumulative target at the last period is the whole year's allotment,
+  // so this one figure settles every period the year is short, not just the
+  // last. Already written, it comes back null.
+  const entry = accruePayPeriod({ ...args, period: final })
+  if (!entry) return { status: 'complete' }
+
+  const yearEnd = toUtcDay(args.benefitYear.end)
+  const yearStart = toUtcDay(args.benefitYear.start)
+  const tracked = args.entries.some((e) => {
+    const day = toUtcDay(e.effectiveDate)
+    return day >= yearStart && day <= yearEnd
+  })
+
+  return tracked ? { status: 'settled', entry } : { status: 'untracked', minutes: entry.minutes }
+}

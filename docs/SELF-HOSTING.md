@@ -24,18 +24,20 @@ cp .env.docker.example .env.docker
 Fill in `.env.docker`. Every variable is explained in `.env.example`; the ones
 that matter here:
 
-- `POSTGRES_PASSWORD`, and the same password inside `DATABASE_URL`.
+- `POSTGRES_PASSWORD` (`openssl rand -hex 24`; never the example's
+  `change-me`), and the same password inside `DATABASE_URL`.
 - `APP_URL` and `AUTH_URL`: the HTTPS address staff will use. Sign-in links and
   redirects are built from it.
 - `AUTH_SECRET` (`openssl rand -base64 33`) and `JOBS_SECRET`
-  (`openssl rand -hex 32`).
+  (`openssl rand -hex 32`). Each at least 32 characters.
 - At least one sign-in method. Emailed links need `AUTH_EMAIL_LINKS=true`,
   `MAIL_TRANSPORT=smtp` and `SMTP_URL`. Google needs `AUTH_GOOGLE_ID` and
   `AUTH_GOOGLE_SECRET` (redirect URI `<APP_URL>/api/auth/callback/google`).
   Microsoft: `docs/ENTRA-SETUP.md`.
 
-The app refuses to start with a configuration that cannot work — no sign-in
-method, emailed links without mail, a missing `JOBS_SECRET` — and says which.
+The app refuses to start with a configuration that cannot work or is unsafe —
+no sign-in method, emailed links without mail, a missing `APP_URL`, a missing
+or short secret, `MAIL_TRANSPORT=file` or `console` — and says which.
 
 ## 2. Start
 
@@ -106,7 +108,9 @@ compares a restored copy with the original.
 
 The `jobs` container posts to `/api/jobs/*` at 07:00 UTC daily, 06:00 UTC on
 Sundays and at a quarter past every hour, the same timetable as
-`.github/workflows/jobs.yml`. Its log shows each run's response. If it was down
-for a while, rerun a missed day from **Admin → Jobs**: every job takes the date
-it acts on and never grants anything twice. `/api/health/jobs` answers 503
+`.github/workflows/jobs.yml`. Its log shows each run's response. Started after
+07:00 UTC, it runs the daily jobs once straight away, so a restart that spans
+the daily slot does not skip that day. If it was down for longer, rerun a
+missed day from **Admin → Jobs**: every job takes the date it acts on and never
+grants anything twice. `/api/health/jobs` answers 503
 when a job is overdue, for an uptime monitor to poll.

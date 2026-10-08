@@ -8,13 +8,21 @@
  * unnoticed for a year, so absence is checked for directly: each job's last
  * success against how often it is meant to run.
  *
- * `overdueJobs` is pure; `jobHealth` reads the run log. Both the Admin → Jobs
- * page and `/api/health/jobs` (which an Azure availability alert polls) use it.
+ * One absence a daily heartbeat cannot show: a benefit year that began with
+ * no rollover. The rollover job succeeds every day, so its last success is
+ * always recent; what matters once a year is whether any of those runs
+ * actually rolled the year over. `missedRollover` asks that directly.
+ *
+ * `overdueJobs` and `missedRollover` are pure; `jobHealth` reads the run log.
+ * Both the Admin → Jobs page and `/api/health/jobs` (which an Azure
+ * availability alert polls) use it.
  */
 
+import { addDays, benefitYearContaining, todayIn } from '@/lib/accrual/dates'
 import { db } from '@/lib/db'
 
 import { JOB_CADENCE, JOB_NAMES, type Cadence, type JobName } from './catalog'
+import { ROLLOVER_JOB, rolloverRunFor } from './rollover-log'
 
 const HOUR = 60 * 60 * 1000
 
@@ -34,6 +42,8 @@ export type OverdueJob = {
   cadence: Cadence
   /** Null when the job has never succeeded. */
   lastSucceededAt: Date | null
+  /** Set when the job is running but has not done what it is for. */
+  reason?: string
 }
 
 export function overdueJobs(
@@ -62,6 +72,55 @@ export async function lastSuccesses(): Promise<Map<string, Date>> {
   return map
 }
 
+/**
+ * True once a benefit year is a day old with no rollover into it.
+ *
+ * The rollover job catches up on its own — any run after the first day acts if
+ * none has — so this is only ever true when the job is not running at all, or
+ * keeps failing. The first day itself is allowed: the run may simply not have
+ * fired yet.
+ */
+export function missedRollover(args: {
+  today: Date
+  yearStart: Date
+  rolledOver: boolean
+}): boolean {
+  return !args.rolledOver && args.today.getTime() >= addDays(args.yearStart, 1).getTime()
+}
+
 export async function jobHealth(now: Date = new Date()): Promise<OverdueJob[]> {
-  return overdueJobs(await lastSuccesses(), now)
+  const successes = await lastSuccesses()
+  const overdue = overdueJobs(successes, now)
+
+  if (!overdue.some((job) => job.jobName === ROLLOVER_JOB)) {
+    const reason = await rolloverOutstanding(now)
+    if (reason) {
+      overdue.push({
+        jobName: ROLLOVER_JOB,
+        cadence: JOB_CADENCE[ROLLOVER_JOB],
+        lastSucceededAt: successes.get(ROLLOVER_JOB) ?? null,
+        reason,
+      })
+    }
+  }
+
+  return overdue
+}
+
+/** Why the current benefit year's rollover counts as missed, or null. */
+async function rolloverOutstanding(now: Date): Promise<string | null> {
+  const org = await db.orgSettings.findUnique({
+    where: { id: 1 },
+    select: { timezone: true, benefitYearStartMonth: true, benefitYearStartDay: true },
+  })
+  // Unconfigured: nothing has a benefit year yet, and the jobs say so loudly
+  // enough on their own.
+  if (!org) return null
+
+  const today = todayIn(org.timezone, now)
+  const year = benefitYearContaining(today, org.benefitYearStartMonth, org.benefitYearStartDay)
+  const rolledOver = (await rolloverRunFor(year.label)) !== null
+
+  if (!missedRollover({ today, yearStart: year.start, rolledOver })) return null
+  return `The ${year.label} benefit year began on ${year.start.toISOString().slice(0, 10)} and has not been rolled over.`
 }

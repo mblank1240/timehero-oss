@@ -7,6 +7,7 @@ import {
   saveCarryoverWindow,
   saveRolloverRule,
 } from '@/lib/config/actions'
+import { requireAdmin } from '@/lib/authz'
 import { db } from '@/lib/db'
 
 export const metadata = { title: 'Rollover · TimeHero' }
@@ -37,6 +38,7 @@ function monthDay(month: number, day: number): string {
 }
 
 export default async function RolloverPage() {
+  await requireAdmin()
   const types = await db.leaveType.findMany({
     where: { isActive: true },
     orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],

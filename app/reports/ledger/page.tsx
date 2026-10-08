@@ -1,4 +1,5 @@
 import { Downloads } from '@/components/report-filters'
+import { requireReportsAccess } from '@/lib/authz'
 import { formatDuration } from '@/lib/duration'
 import { orgSettingsOrThrow } from '@/lib/ledger/policies'
 import { employeeLedgerReport, reportEmployees, reportLeaveTypes } from '@/lib/reports/data'
@@ -15,6 +16,7 @@ export const metadata = { title: 'Employee ledger · Reports · TimeHero' }
  * Ledger.
  */
 export default async function LedgerReportPage({ searchParams }: PageProps<'/reports/ledger'>) {
+  await requireReportsAccess()
   const params = await searchParams
   const [org, employees, leaveTypes] = await Promise.all([
     orgSettingsOrThrow(),

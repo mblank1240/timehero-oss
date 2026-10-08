@@ -1,6 +1,7 @@
 import Link from 'next/link'
 
 import { ActionButton, ConfigForm, Field, SubmitButton } from '@/components/form'
+import { requireAdmin } from '@/lib/authz'
 import { db } from '@/lib/db'
 import {
   disconnectDirectory,
@@ -22,6 +23,7 @@ export const metadata = { title: 'Directory · TimeHero' }
  * Google sign-in.
  */
 export default async function DirectoryPage({ searchParams }: PageProps<'/admin/directory'>) {
+  await requireAdmin()
   const params = await searchParams
   const emailLinks = await emailLinksAvailable()
   const [org, connections, review] = await Promise.all([

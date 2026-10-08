@@ -5,7 +5,12 @@ import { redirect } from 'next/navigation'
 import { signIn } from '@/lib/auth'
 import { getCurrentUser } from '@/lib/authz'
 import { env, isEntraConfigured, isGoogleConfigured } from '@/lib/env'
-import { emailLinksAvailable, requestSignInLink, signInLinkInput } from '@/lib/sign-in-links'
+import {
+  clientIpFrom,
+  emailLinksAvailable,
+  requestSignInLink,
+  signInLinkInput,
+} from '@/lib/sign-in-links'
 
 export const metadata = { title: 'Sign in · TimeHero' }
 
@@ -21,8 +26,10 @@ const MESSAGES: Record<string, string> = {
   WrongTenant:
     'That account is not from your organization. Sign in with the account your organization gave you.',
   UntrustedTenant:
-    'This Microsoft account cannot be matched to an employee until your administrator connects your organization’s Microsoft 365.',
+    'This account cannot be matched to an employee until your administrator connects your organization’s Microsoft 365 or Google Workspace.',
   Inactive: 'Your employee record is not active. Please contact your administrator.',
+  DirectoryDisabled:
+    'Your organization’s directory shows your account as disabled. Please contact your administrator.',
   DirectoryUnavailable:
     'Your organization’s directory could not be reached to set up your account. Please try again shortly.',
   CredentialsSignin:
@@ -130,10 +137,9 @@ export default async function SignInPage({ searchParams }: PageProps<'/signin'>)
             'use server'
             const parsed = signInLinkInput.safeParse({ email: formData.get('email') })
             if (!parsed.success) redirect('/signin?error=BadEmail')
-            const forwarded = (await headers()).get('x-forwarded-for')
             const outcome = await requestSignInLink({
               email: parsed.data.email,
-              ipAddress: forwarded?.split(',')[0]?.trim() || null,
+              ipAddress: clientIpFrom((await headers()).get('x-forwarded-for')),
             })
             redirect(
               outcome === 'RATE_LIMITED'

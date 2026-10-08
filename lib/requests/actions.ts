@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { z } from 'zod'
 
-import { todayIn } from '@/lib/accrual/dates'
+import { benefitYearContaining, todayIn } from '@/lib/accrual/dates'
 import { ForbiddenError, getCurrentUser } from '@/lib/authz'
 import { db } from '@/lib/db'
 import type { ActionResult } from '@/lib/employees/actions'
@@ -12,7 +12,7 @@ import { accruableBy, orgSettingsOrThrow } from '@/lib/ledger/policies'
 import { deliverSoon } from '@/lib/notifications/after'
 
 import type { Actor } from './chain'
-import { assess, loadLeaveContext } from './context'
+import { assess, isoToDate, loadLeaveContext } from './context'
 import {
   MAX_REQUEST_DAYS,
   amendInput,
@@ -28,6 +28,7 @@ import {
   amendLeaveRequest,
   cancelLeaveRequest,
   decideLeaveRequest,
+  latestRequestableDate,
   rerouteLeaveRequest,
   submitLeaveRequest,
 } from './service'
@@ -234,6 +235,38 @@ const previewInput = z.object({
     .max(MAX_REQUEST_DAYS),
 })
 
+/**
+ * The dates a preview may ask about. Submission refuses the same range
+ * (`latestRequestableDate` and `refuseClosedYear` in ./service), so nothing
+ * the form could actually send is turned away here.
+ */
+function previewWindow(
+  today: Date,
+  org: { benefitYearStartMonth: number; benefitYearStartDay: number },
+): { earliest: Date; latest: Date } {
+  return {
+    earliest: benefitYearContaining(today, org.benefitYearStartMonth, org.benefitYearStartDay)
+      .start,
+    latest: latestRequestableDate(today),
+  }
+}
+
+/** Every day a real calendar date (no 2026-02-31) inside the window. */
+function daysWithin(
+  days: readonly { date: string }[],
+  window: { earliest: Date; latest: Date },
+): boolean {
+  return days.every((d) => {
+    const date = isoToDate(d.date)
+    return (
+      !Number.isNaN(date.getTime()) &&
+      date.toISOString().slice(0, 10) === d.date &&
+      date >= window.earliest &&
+      date <= window.latest
+    )
+  })
+}
+
 export type RequestPreview =
   | {
       ok: true
@@ -277,6 +310,13 @@ export async function previewRequest(input: unknown): Promise<RequestPreview> {
       return { ok: false }
     }
 
+    // The projection runs day by day out to the last date asked about, so an
+    // unbounded date (9999-12-31) would hold the event loop for minutes. The
+    // same window submission enforces: no earlier than the open benefit year,
+    // no later than the generated pay calendar.
+    const today = todayIn(org.timezone)
+    if (!daysWithin(days, previewWindow(today, org))) return { ok: false }
+
     const amending =
       actor.role === 'ADMIN' && parsed.data.requestId
         ? await db.leaveRequest.findFirst({
@@ -293,7 +333,7 @@ export async function previewRequest(input: unknown): Promise<RequestPreview> {
     const ctx = await loadLeaveContext({
       employeeId,
       leaveTypeId: parsed.data.leaveTypeId,
-      today: todayIn(org.timezone),
+      today,
       benefitYearStart: { month: org.benefitYearStartMonth, day: org.benefitYearStartDay },
       excludeRequestId: amending?.id,
     })

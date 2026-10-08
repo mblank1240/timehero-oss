@@ -16,11 +16,16 @@ RUN DATABASE_URL=postgresql://build@localhost:5432/build npm ci --no-audit --no-
 FROM deps AS tools
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+# Migrations, setup and the import only read /app and talk to the database;
+# none of them needs root. The files stay root-owned, so not writable either.
+USER node
 
 FROM tools AS build
+# The build writes .next into /app.
+USER root
 # lib/env.ts parses these at build time; the real values arrive at runtime.
 RUN DATABASE_URL=postgresql://build@localhost:5432/build \
-    AUTH_SECRET=build-only-not-used-at-runtime \
+    AUTH_SECRET=build-only-placeholder-not-used-at-runtime \
     npm run build
 
 FROM node:22-alpine AS app

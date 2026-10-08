@@ -12,6 +12,8 @@ import webpush, { WebPushError } from 'web-push'
 
 import { env, isPushConfigured } from '@/lib/env'
 
+import { isAllowedPushEndpoint } from './push-endpoint'
+
 export type PushTarget = { endpoint: string; p256dh: string; auth: string }
 
 export type PushPayload = { title: string; body: string; url: string; tag: string }
@@ -32,18 +34,28 @@ function configure() {
  */
 const TTL_SECONDS = 24 * 60 * 60
 
+/**
+ * How long to wait on a push service. Delivery sends one at a time, so a
+ * service that never answers would otherwise hold up everyone after it.
+ */
+const TIMEOUT_MS = 10_000
+
 export async function sendPush(
   target: PushTarget,
   payload: PushPayload,
 ): Promise<{ result: PushResult; error?: string }> {
   if (!isPushConfigured) return { result: 'FAILED', error: 'Web Push is not configured.' }
   configure()
+  // Rows saved before the allowlist existed are checked again at send time.
+  if (!isAllowedPushEndpoint(target.endpoint)) {
+    return { result: 'FAILED', error: 'Not a known Web Push service.' }
+  }
 
   try {
     await webpush.sendNotification(
       { endpoint: target.endpoint, keys: { p256dh: target.p256dh, auth: target.auth } },
       JSON.stringify(payload),
-      { TTL: TTL_SECONDS, urgency: 'normal' },
+      { TTL: TTL_SECONDS, urgency: 'normal', timeout: TIMEOUT_MS },
     )
     return { result: 'SENT' }
   } catch (error) {

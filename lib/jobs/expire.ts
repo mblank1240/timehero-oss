@@ -7,14 +7,22 @@
  *
  * Only employees who actually hold an expired lot are loaded — most days that
  * is nobody, and the job should cost nothing on those days.
+ *
+ * Each account is written separately and a failure is collected rather than
+ * thrown, like the rollover: one bad ledger must not keep everyone else's
+ * expired time on the books. The run is failed at the end if any was skipped.
+ *
+ * Pending leave requests are not consulted. A request submitted against a lot
+ * that has since expired is caught when it is approved — the final balance
+ * check reads this job's forfeit along with everything else (see
+ * `firstShortfall`) — rather than by holding expired time back here.
  */
 
 import { expireLots } from '@/lib/accrual/expiry'
-import type { ProposedEntry } from '@/lib/accrual/types'
 import { db } from '@/lib/db'
 import { entriesFor, writeEntries } from '@/lib/ledger/entries'
 
-import type { JobOutcome, JobRunContext } from './runner'
+import { describeFailure, throwIfFailures, type JobOutcome, type JobRunContext } from './runner'
 
 export async function runExpireLots(asOf: Date, run: JobRunContext): Promise<JobOutcome> {
   // Candidates, not conclusions: a lot past its expiry date may well have been
@@ -26,30 +34,39 @@ export async function runExpireLots(asOf: Date, run: JobRunContext): Promise<Job
     distinct: ['employeeId', 'leaveTypeId'],
   })
 
-  const proposed: ProposedEntry[] = []
+  let entriesCreated = 0
+  let proposed = 0
+  let minutesForfeited = 0
+  const failures: string[] = []
 
   for (const candidate of candidates) {
-    const entries = await entriesFor(candidate.employeeId, candidate.leaveTypeId)
+    try {
+      const entries = await entriesFor(candidate.employeeId, candidate.leaveTypeId)
 
-    proposed.push(
-      ...expireLots({
+      const forfeits = expireLots({
         employee: { id: candidate.employeeId },
         leaveTypeId: candidate.leaveTypeId,
         entries,
         asOf,
-      }),
-    )
+      })
+
+      entriesCreated += await writeEntries(forfeits, { jobRunId: run.jobRunId })
+      proposed += forfeits.length
+      minutesForfeited -= forfeits.reduce((sum, e) => sum + e.minutes, 0)
+    } catch (error) {
+      failures.push(describeFailure(`${candidate.employeeId}/${candidate.leaveTypeId}`, error))
+    }
   }
 
-  const entriesCreated = await writeEntries(proposed, { jobRunId: run.jobRunId })
+  throwIfFailures('lot expiries', failures)
 
   return {
     entriesCreated,
     detail: {
       accountsChecked: candidates.length,
-      forfeitsProposed: proposed.length,
-      minutesForfeited: -proposed.reduce((sum, e) => sum + e.minutes, 0),
-      skippedAsAlreadyWritten: proposed.length - entriesCreated,
+      forfeitsProposed: proposed,
+      minutesForfeited,
+      skippedAsAlreadyWritten: proposed - entriesCreated,
     },
   }
 }

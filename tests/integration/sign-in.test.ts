@@ -10,9 +10,12 @@ import type { Directory } from '@/lib/directory/sources'
 import { runDirectorySync } from '@/lib/directory/sync'
 import { env } from '@/lib/env'
 import {
+  MAX_LINKS_SENT_PER_HOUR,
   MAX_REQUESTS_PER_ADDRESS_PER_HOUR,
   consumeSignInLink,
   emailLinksAvailable,
+  hashToken,
+  newToken,
   requestSignInLink,
 } from '@/lib/sign-in-links'
 
@@ -61,6 +64,17 @@ async function tokenMailedTo(to: string): Promise<string | null> {
   return null
 }
 
+/**
+ * Asks for a link and waits for the message. Outside a request there is no
+ * `after()`, so the send runs here instead of once a response has gone.
+ */
+async function request(args: Parameters<typeof requestSignInLink>[0]) {
+  const sending: Promise<void>[] = []
+  const outcome = await requestSignInLink({ ...args, defer: (task) => sending.push(task()) })
+  await Promise.all(sending)
+  return outcome
+}
+
 function directoryOf(users: DirectoryUser[], domains = [DOMAIN]): Directory {
   return {
     listUsers: async () => users,
@@ -107,7 +121,7 @@ afterAll(async () => {
 describe('emailed sign-in links', () => {
   it('sends a single-use link to an employee who may sign in', async () => {
     const sam = await person('sam')
-    expect(await requestSignInLink({ email: ` SAM@${DOMAIN} `, ipAddress: '203.0.113.1' })).toBe(
+    expect(await request({ email: ` SAM@${DOMAIN} `, ipAddress: '203.0.113.1' })).toBe(
       'SENT_IF_KNOWN',
     )
 
@@ -128,7 +142,7 @@ describe('emailed sign-in links', () => {
 
   it('says the same thing for an unknown address, and sends nothing', async () => {
     const email = `nobody@${DOMAIN}`
-    expect(await requestSignInLink({ email, ipAddress: '203.0.113.2' })).toBe('SENT_IF_KNOWN')
+    expect(await request({ email, ipAddress: '203.0.113.2' })).toBe('SENT_IF_KNOWN')
     expect(await tokenMailedTo(email)).toBeNull()
     const row = await db.signInLinkRequest.findFirstOrThrow({ where: { email } })
     expect(row.tokenHash).toBeNull()
@@ -136,13 +150,13 @@ describe('emailed sign-in links', () => {
 
   it('sends nothing to someone who may not sign in', async () => {
     const gone = await person('gone', { isActive: false })
-    await requestSignInLink({ email: gone.email, ipAddress: null })
+    await request({ email: gone.email, ipAddress: null })
     expect(await tokenMailedTo(gone.email)).toBeNull()
   })
 
   it('refuses an expired link, or one whose employee has since left', async () => {
     const pat = await person('pat')
-    await requestSignInLink({
+    await request({
       email: pat.email,
       ipAddress: null,
       now: new Date(Date.now() - 3_600_000),
@@ -150,7 +164,7 @@ describe('emailed sign-in links', () => {
     expect(await consumeSignInLink((await tokenMailedTo(pat.email))!)).toBeNull()
 
     const lee = await person('lee')
-    await requestSignInLink({ email: lee.email, ipAddress: null })
+    await request({ email: lee.email, ipAddress: null })
     const token = (await tokenMailedTo(lee.email))!
     await db.employee.update({ where: { id: lee.id }, data: { isActive: false } })
     expect(await consumeSignInLink(token)).toBeNull()
@@ -162,7 +176,7 @@ describe('emailed sign-in links', () => {
     await db.orgSettings.update({ where: { id: 1 }, data: { mailFromAddress: null } })
     try {
       expect(await emailLinksAvailable()).toBe(false)
-      expect(await requestSignInLink({ email: noAddress.email, ipAddress: null })).toBe(
+      expect(await request({ email: noAddress.email, ipAddress: null })).toBe(
         'UNAVAILABLE',
       )
       expect(await tokenMailedTo(noAddress.email)).toBeNull()
@@ -176,9 +190,57 @@ describe('emailed sign-in links', () => {
   it('limits requests per address, whether or not it exists', async () => {
     const email = `limited@${DOMAIN}`
     for (let i = 0; i < MAX_REQUESTS_PER_ADDRESS_PER_HOUR; i += 1) {
-      expect(await requestSignInLink({ email, ipAddress: null })).toBe('SENT_IF_KNOWN')
+      expect(await request({ email, ipAddress: null })).toBe('SENT_IF_KNOWN')
     }
-    expect(await requestSignInLink({ email, ipAddress: null })).toBe('RATE_LIMITED')
+    expect(await request({ email, ipAddress: null })).toBe('RATE_LIMITED')
+  })
+
+  it('limits the links mailed in an hour across everyone, for every address alike', async () => {
+    const ari = await person('ari')
+    const since = new Date(Date.now() - 3_600_000)
+    const sent = await db.signInLinkRequest.count({
+      where: { tokenHash: { not: null }, createdAt: { gte: since } },
+    })
+    const flood = `flood@${DOMAIN}`
+    await db.signInLinkRequest.createMany({
+      data: Array.from({ length: Math.max(0, MAX_LINKS_SENT_PER_HOUR - sent) }, () => ({
+        email: flood,
+        employeeId: ari.id,
+        tokenHash: hashToken(newToken()),
+        expiresAt: new Date(Date.now() + 60_000),
+      })),
+    })
+    try {
+      expect(await request({ email: ari.email, ipAddress: '203.0.113.9' })).toBe('RATE_LIMITED')
+      expect(await tokenMailedTo(ari.email)).toBeNull()
+      expect(await request({ email: `nobody-else@${DOMAIN}`, ipAddress: '203.0.113.9' })).toBe(
+        'RATE_LIMITED',
+      )
+    } finally {
+      await db.signInLinkRequest.deleteMany({ where: { email: flood } })
+    }
+    expect(await request({ email: ari.email, ipAddress: '203.0.113.9' })).toBe('SENT_IF_KNOWN')
+  })
+})
+
+describe('Google sign-in with no Workspace registered', () => {
+  it('links nobody by address, so a personal account on a work address gets nowhere', async () => {
+    const casey = await person('casey')
+    const signIn = {
+      provider: 'GOOGLE' as const,
+      subject: `${RUN}-casey`,
+      tenant: null,
+      email: casey.email,
+      emailVerified: true,
+    }
+    expect(await resolveExternalSignIn(signIn)).toEqual({ ok: false, refusal: 'UntrustedTenant' })
+    expect(await db.identity.count({ where: { employeeId: casey.id } })).toBe(0)
+
+    // A Google account bound earlier — by an administrator, say — still gets in.
+    await db.identity.create({
+      data: { employeeId: casey.id, provider: 'GOOGLE', subject: signIn.subject },
+    })
+    expect(await resolveExternalSignIn(signIn)).toEqual({ ok: true, employeeId: casey.id })
   })
 })
 
@@ -279,6 +341,19 @@ describe('the directory sync', () => {
     expect(result.detail?.MICROSOFT).toMatchObject({ created: 1, linked: 1, flaggedDisabled: 1 })
     expect(await db.identity.count({ where: { employeeId: jess.id } })).toBe(1)
     expect((await db.employee.findUniqueOrThrow({ where: { id: kim.id } })).needsReview).toBe(true)
+
+    // Flagged, not deactivated — but not signed in by any route meanwhile.
+    expect(
+      await resolveExternalSignIn({
+        provider: 'MICROSOFT',
+        subject: `${RUN}-kim`,
+        tenant: TENANT,
+        email: kim.email,
+        emailVerified: true,
+      }),
+    ).toEqual({ ok: false, refusal: 'DirectoryDisabled' })
+    expect(await request({ email: kim.email, ipAddress: '203.0.113.3' })).toBe('SENT_IF_KNOWN')
+    expect(await tokenMailedTo(kim.email)).toBeNull()
     const alex = await db.employee.findUniqueOrThrow({ where: { email: `alex@${DOMAIN}` } })
     expect(alex.hireDate).toEqual(new Date('2025-03-03T00:00:00Z'))
 

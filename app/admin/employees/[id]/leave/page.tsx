@@ -14,8 +14,8 @@ export const metadata = { title: 'Record leave · TimeHero' }
  * or is recorded as already approved.
  */
 export default async function RecordLeavePage({ params }: PageProps<'/admin/employees/[id]/leave'>) {
-  const { id } = await params
   const admin = await requireAdmin()
+  const { id } = await params
 
   const employee = await db.employee.findUnique({
     where: { id },

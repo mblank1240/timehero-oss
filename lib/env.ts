@@ -22,7 +22,14 @@ const optionalText = z
  */
 const isBuildPhase = process.env.NEXT_PHASE === 'phase-production-build'
 
-const schema = z
+/**
+ * The shortest AUTH_SECRET or JOBS_SECRET production accepts. 32 characters of
+ * `openssl rand -base64 33` (or `-hex 32`) is far beyond guessing; anything
+ * shorter was typed by hand.
+ */
+export const MIN_SECRET_LENGTH = 32
+
+export const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
     DATABASE_URL: z.string().min(1),
@@ -54,8 +61,9 @@ const schema = z
     /**
      * How mail leaves: `smtp` (SMTP_URL), `graph` (Microsoft Graph, with the
      * Entra app's credentials), or for development `file` (one JSON file per
-     * message in MAIL_FILE_DIR) and `console`. The address it is sent from is
-     * an administrator's setting, not configuration — see lib/mail.
+     * message in MAIL_FILE_DIR) and `console`, both refused in production.
+     * The address it is sent from is an administrator's setting, not
+     * configuration — see lib/mail.
      */
     MAIL_TRANSPORT: z.enum(['smtp', 'graph', 'file', 'console']).optional(),
     SMTP_URL: optionalText,
@@ -157,6 +165,36 @@ const schema = z
           message: 'Emailed sign-in links need MAIL_TRANSPORT=smtp or graph in production.',
         })
       }
+      // Both development transports keep every message on the server —
+      // sign-in links included — readable by anyone with the logs or disk.
+      if (env.MAIL_TRANSPORT === 'file' || env.MAIL_TRANSPORT === 'console') {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['MAIL_TRANSPORT'],
+          message: `MAIL_TRANSPORT=${env.MAIL_TRANSPORT} is for development only. Use smtp or graph, or leave it unset to send no mail.`,
+        })
+      }
+      // Links in mail and the Microsoft consent redirect are built from it;
+      // without it they would point at localhost.
+      if (!env.APP_URL) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['APP_URL'],
+          message: 'APP_URL is required in production: links in mail and sign-in redirects are built from it.',
+        })
+      }
+      // AUTH_SECRET signs every session; JOBS_SECRET lets a caller write to
+      // the ledger. Either one guessed is the whole application.
+      for (const key of ['AUTH_SECRET', 'JOBS_SECRET'] as const) {
+        const value = env[key]
+        if (value && value.length < MIN_SECRET_LENGTH) {
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message: `${key} must be at least ${MIN_SECRET_LENGTH} characters in production (openssl rand -base64 33).`,
+          })
+        }
+      }
     }
 
     // The bypass skips Entra entirely and trusts a posted email address. In
@@ -191,7 +229,7 @@ const schema = z
     }
   })
 
-const parsed = schema.safeParse(process.env)
+const parsed = envSchema.safeParse(process.env)
 
 if (!parsed.success) {
   const detail = parsed.error.issues

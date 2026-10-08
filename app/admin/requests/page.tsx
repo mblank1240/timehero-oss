@@ -1,5 +1,6 @@
 import { OvertimeTable } from '@/components/overtime-table'
 import { RequestTable } from '@/components/request-table'
+import { requireAdmin } from '@/lib/authz'
 import { orgSettingsOrThrow } from '@/lib/ledger/policies'
 import { pendingOvertime } from '@/lib/overtime/queries'
 import { pendingRequests } from '@/lib/requests/queries'
@@ -11,6 +12,7 @@ export const metadata = { title: 'Requests · TimeHero' }
  * sabbatical, a step that needs skipping, a chain that has to be rerouted.
  */
 export default async function AdminRequestsPage() {
+  await requireAdmin()
   const [org, requests, overtime] = await Promise.all([
     orgSettingsOrThrow(),
     pendingRequests(),

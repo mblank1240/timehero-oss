@@ -25,7 +25,6 @@
 
 import { periodContaining, type PayScheduleInput } from '@/lib/payperiods/generate'
 
-import { balanceOf } from './balance'
 import { addDays, benefitYearContaining, fromUtcDay, isSameDay, toUtcDay } from './dates'
 import { expireLots } from './expiry'
 import { grantLump } from './grant'
@@ -170,26 +169,44 @@ export type Shortfall = {
  * The first point, on or after `from`, at which spending leaves the balance
  * below zero, or null when there is none.
  *
- * Checked at every date some usage lands on, not only the dates of the request
- * being validated. A request for October can be affordable in October and
- * still leave an already-approved December request uncovered; the employee
- * has to hear about that now, not in December.
+ * Checked at every date any entry lands on from `from` onward — the balance
+ * only moves on those dates, so that is every day without walking the
+ * calendar. Not only the request's own dates:
+ *
+ * - A request for October can be affordable in October and still leave an
+ *   already-approved December request uncovered; the employee has to hear
+ *   about that now, not in December.
+ * - Time can leave *after* the day it is spent from. A comp lot expiring on
+ *   31 March is forfeited on 1 April by the expiry job, which knows nothing of
+ *   a request for 30 March still waiting on its last approval. Approving that
+ *   request on 2 April puts the same 480 minutes on the ledger twice — once
+ *   spent, once forfeited — and the balance on 30 March, the only date a
+ *   usage-day check would look at, is still a healthy zero. On 1 April it is
+ *   −480, which is where this finds it.
  */
 export function firstShortfall(entries: readonly ExistingEntry[], from: Date): Shortfall | null {
   const start = toUtcDay(from, 'from')
 
-  const usageDays = [
+  const days = [
     ...new Set(
-      entries
-        .filter((e) => e.kind === 'USAGE' && toUtcDay(e.effectiveDate) >= start)
-        .map((e) => toUtcDay(e.effectiveDate)),
+      entries.map((e) => toUtcDay(e.effectiveDate)).filter((day) => day >= start),
     ),
   ].sort((a, b) => a - b)
 
-  for (const day of usageDays) {
-    const date = fromUtcDay(day)
-    const balance = balanceOf(entries, date)
-    if (balance < 0) return { date, balanceMinutes: balance }
+  // One pass, in date order: the running balance on each day, not a fresh
+  // sum per day.
+  const sorted = entries
+    .map((e) => ({ day: toUtcDay(e.effectiveDate), minutes: e.minutes }))
+    .sort((a, b) => a.day - b.day)
+
+  let balance = 0
+  let next = 0
+  for (const day of days) {
+    while (next < sorted.length && sorted[next].day <= day) {
+      balance += sorted[next].minutes
+      next += 1
+    }
+    if (balance < 0) return { date: fromUtcDay(day), balanceMinutes: balance }
   }
 
   return null

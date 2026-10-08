@@ -1,9 +1,11 @@
 import { DepartmentForm } from '@/components/department-form'
+import { requireAdmin } from '@/lib/authz'
 import { db } from '@/lib/db'
 
 export const metadata = { title: 'Departments · TimeHero' }
 
 export default async function DepartmentsPage() {
+  await requireAdmin()
   const departments = await db.department.findMany({
     orderBy: { name: 'asc' },
     select: {

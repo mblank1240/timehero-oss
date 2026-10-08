@@ -265,7 +265,8 @@ export async function compPlanFor(
     },
   })
   const entries = await entriesFor(log.employeeId, type.id, client)
-  const { current, previous } = years(org, todayIn(org.timezone))
+  const today = todayIn(org.timezone)
+  const { current, previous } = years(org, today)
 
   return planCompEarned({
     log,
@@ -279,6 +280,7 @@ export async function compPlanFor(
     rule: type.rolloverRule,
     windows: type.carryoverWindows,
     entries,
+    today,
   })
 }
 
@@ -372,6 +374,12 @@ export async function decideOvertimeLog(
           'Overtime logging is switched off, so there is no comp type to bank this into.',
         )
       }
+
+      // Comp that expired before it was approved would be granted and
+      // forfeited the next night, never spendable. Refused rather than
+      // written, so the approver decides what is owed instead of the ledger
+      // recording a grant nobody could use. Throwing rolls back the step.
+      if (plan.expiredOn) throw new RequestError(plan.explanation ?? 'This time has expired.')
 
       await writeEntries(plan.entries, { createdById: actor.id }, tx)
       earned = plan.earnedMinutes

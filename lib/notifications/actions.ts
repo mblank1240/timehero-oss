@@ -109,6 +109,9 @@ export async function savePreferences(
   }
 }
 
+/** Browsers one employee may have subscribed at once. */
+const MAX_PUSH_SUBSCRIPTIONS_PER_EMPLOYEE = 10
+
 /** Records this browser's push subscription for the signed-in employee. */
 export async function subscribePush(input: unknown): Promise<ActionResult> {
   try {
@@ -126,6 +129,18 @@ export async function subscribePush(input: unknown): Promise<ActionResult> {
       update: { employeeId: user.id, p256dh: keys.p256dh, auth: keys.auth, userAgent },
       create: { employeeId: user.id, endpoint, p256dh: keys.p256dh, auth: keys.auth, userAgent },
     })
+
+    // Every subscription is a send on every notification. Past the cap, the
+    // oldest go — most likely browsers long since cleared or replaced.
+    const stale = await db.pushSubscription.findMany({
+      where: { employeeId: user.id },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      skip: MAX_PUSH_SUBSCRIPTIONS_PER_EMPLOYEE,
+      select: { id: true },
+    })
+    if (stale.length > 0) {
+      await db.pushSubscription.deleteMany({ where: { id: { in: stale.map((s) => s.id) } } })
+    }
 
     revalidatePath('/notifications')
     return { ok: true }

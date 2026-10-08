@@ -241,10 +241,12 @@ describe('the rollover job', () => {
     })
   })
 
-  it('does nothing on a day that is not the benefit year start', async () => {
+  it('does nothing later in a year that has already been rolled over', async () => {
+    await runBenefitYearRollover(d('2026-01-01'))
+
     const result = await runBenefitYearRollover(d('2026-06-15'))
     expect(result.entriesCreated).toBe(0)
-    expect(result.detail?.skipped).toBe('not the benefit year start')
+    expect(result.detail?.skipped).toBe('already rolled over')
   })
 
   /**
@@ -309,10 +311,23 @@ describe('the rollover job', () => {
 
     expect(await balanceAsOf(veteranId, leaveTypeId, d('2027-12-31'))).toBe(10_800)
 
-    await runBenefitYearRollover(d('2028-01-01'))
+    // The run on 1 January was missed; the first one after it catches up,
+    // with every figure as of the boundary and every entry dated on it.
+    const late = await runBenefitYearRollover(d('2028-01-12'))
+    expect(late.detail).toMatchObject({ newYear: 2028, caughtUp: true })
 
     // 10800 closing, 2400 carried, 8400 forfeited, plus the new allotment.
     expect(await balanceAsOf(veteranId, leaveTypeId, d('2028-01-01'))).toBe(2400 + ANNUAL)
+    const rollover = (await entriesFor(veteranId)).filter((e) => e.periodKey?.startsWith('2028-'))
+    expect(rollover.map((e) => [iso(e.effectiveDate), e.minutes, e.kind])).toEqual([
+      ['2028-01-01', -10_800, 'FORFEIT'],
+      ['2028-01-01', 2400, 'ROLLOVER_IN'],
+      ['2028-01-01', ANNUAL, 'LUMP_GRANT'],
+    ])
+
+    // And only once: the next day's run finds it done.
+    const after = await runBenefitYearRollover(d('2028-01-13'))
+    expect(after.detail?.skipped).toBe('already rolled over')
   })
 })
 

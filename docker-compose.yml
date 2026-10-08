@@ -8,10 +8,18 @@
 # The app listens on port 3000. Put it behind a reverse proxy that terminates
 # HTTPS (Caddy, nginx, Traefik): sign-in cookies and push need it.
 
+# Docker's default json-file log grows without limit; keep the last 50 MB.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '5'
+
 services:
   db:
     image: postgres:17-alpine
     restart: unless-stopped
+    logging: *logging
     env_file: .env.docker
     environment:
       POSTGRES_USER: timehero
@@ -30,6 +38,7 @@ services:
     image: timehero-tools
     env_file: .env.docker
     command: ['npx', 'prisma', 'migrate', 'deploy']
+    logging: *logging
     depends_on:
       db: { condition: service_healthy }
 
@@ -40,6 +49,7 @@ services:
     env_file: .env.docker
     ports:
       - '${TIMEHERO_PORT:-3000}:3000'
+    logging: *logging
     depends_on:
       migrate: { condition: service_completed_successfully }
 
@@ -50,6 +60,11 @@ services:
     restart: unless-stopped
     env_file: .env.docker
     command: ['node', 'docker/scheduler.mjs']
+    # The image's health check asks the web server, which this container
+    # does not run; inherited, it would report unhealthy forever.
+    healthcheck:
+      disable: true
+    logging: *logging
     depends_on:
       app: { condition: service_healthy }
 
