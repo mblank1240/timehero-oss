@@ -1,0 +1,7 @@
+email,leave_type,balance,expires_on
+pat.leader@example.org,PTO,9.5d,
+pat.leader@example.org,SICK,40d,
+pat.leader@example.org,COMP,12h,2027-02-28
+sam.staff@example.org,PTO,3d,
+sam.staff@example.org,SICK,14d,
+jo.parttime@example.org,PTO,20h,

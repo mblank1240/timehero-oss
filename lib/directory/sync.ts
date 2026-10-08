@@ -1,0 +1,261 @@
+/**
+ * Applying a directory sync, and creating one employee from the directory at
+ * sign-in. The decisions are `planDirectorySync` and `decideExternalSignIn`;
+ * this reads, writes and audits.
+ */
+
+import type { Prisma } from '@prisma/client'
+
+import { writeAudit } from '@/lib/audit'
+import { db } from '@/lib/db'
+import type { JobOutcome } from '@/lib/jobs/runner'
+
+import { addressOf, employeeFromDirectoryUser, planDirectorySync, type DirectoryUser } from './plan'
+import { directoryFor, type Directory } from './sources'
+
+type Provider = 'MICROSOFT' | 'GOOGLE'
+
+/**
+ * Syncs every registered directory that can be read. A daily job, and the
+ * "Sync now" button. `asOf` is the hire date given to anyone created whose
+ * directory entry has none.
+ */
+export async function runDirectorySync(
+  asOf: Date,
+  opts: {
+    actorId?: string | null
+    directory?: (provider: Provider) => Promise<Directory>
+  } = {},
+): Promise<JobOutcome> {
+  const connections = await db.directoryConnection.findMany({
+    select: {
+      id: true,
+      provider: true,
+      tenantId: true,
+      domains: true,
+      autoProvision: true,
+    },
+  })
+  if (connections.length === 0) {
+    return { entriesCreated: 0, detail: { connections: 0 } }
+  }
+
+  let created = 0
+  const results: Record<string, unknown> = {}
+
+  for (const connection of connections) {
+    try {
+      const directory = opts.directory
+        ? await opts.directory(connection.provider)
+        : await directoryFor(connection)
+      // Domains first: one added to the tenant since the last sync should
+      // count for this one.
+      const domains = await directory.verifiedDomains()
+      if (domains.length > 0 && domains.join() !== connection.domains.join()) {
+        await db.directoryConnection.update({
+          where: { id: connection.id },
+          data: { domains },
+        })
+        connection.domains = domains
+      }
+      const outcome = await syncOne(
+        connection,
+        await directory.listUsers(),
+        asOf,
+        opts.actorId ?? null,
+      )
+      created += outcome.created
+      results[connection.provider] = outcome
+      await db.directoryConnection.update({
+        where: { id: connection.id },
+        data: {
+          lastSyncAt: new Date(),
+          lastSyncDetail: outcome as Prisma.InputJsonValue,
+        },
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      results[connection.provider] = { error: message }
+      await db.directoryConnection.update({
+        where: { id: connection.id },
+        data: { lastSyncAt: new Date(), lastSyncDetail: { error: message } },
+      })
+    }
+  }
+
+  const failed = Object.values(results).filter((r) => (r as { error?: string }).error)
+  if (failed.length === connections.length) {
+    throw new Error(
+      `Directory sync failed: ${failed.map((f) => (f as { error: string }).error).join('; ')}`,
+    )
+  }
+  return { entriesCreated: created, detail: results }
+}
+
+async function syncOne(
+  connection: {
+    provider: Provider
+    tenantId: string
+    domains: string[]
+    autoProvision: boolean
+  },
+  users: DirectoryUser[],
+  asOf: Date,
+  actorId: string | null,
+) {
+  const employees = await db.employee.findMany({
+    select: {
+      id: true,
+      email: true,
+      isActive: true,
+      identities: {
+        where: { provider: connection.provider },
+        select: { subject: true },
+      },
+    },
+  })
+  const plan = planDirectorySync({
+    users,
+    employees: employees.map((e) => ({
+      id: e.id,
+      email: e.email,
+      isActive: e.isActive,
+      subjects: e.identities.map((i) => i.subject),
+    })),
+    domains: connection.domains,
+    autoProvision: connection.autoProvision,
+  })
+
+  await db.$transaction(async (tx) => {
+    for (const { employeeId, user } of plan.link) {
+      await tx.identity.create({
+        data: identityData(connection, user, employeeId),
+      })
+    }
+    for (const user of plan.create) {
+      const employee = await tx.employee.create({
+        data: employeeFromDirectoryUser(user, asOf),
+      })
+      await tx.identity.create({
+        data: identityData(connection, user, employee.id),
+      })
+      await writeAudit(
+        {
+          actorId,
+          action: 'employee.createFromDirectory',
+          entityType: 'Employee',
+          entityId: employee.id,
+          after: {
+            email: employee.email,
+            provider: connection.provider,
+            subject: user.id,
+          },
+        },
+        tx,
+      )
+    }
+    for (const r of plan.refresh) {
+      await tx.identity.update({
+        where: {
+          provider_subject: {
+            provider: connection.provider,
+            subject: r.subject,
+          },
+        },
+        data: { directoryAccountEnabled: r.enabled, email: r.email },
+      })
+    }
+    if (plan.flagDisabled.length > 0) {
+      await tx.employee.updateMany({
+        where: { id: { in: plan.flagDisabled } },
+        data: { needsReview: true },
+      })
+    }
+  })
+
+  const outcome = {
+    created: plan.create.length,
+    linked: plan.link.length,
+    flaggedDisabled: plan.flagDisabled.length,
+    alreadyBound: plan.refresh.length,
+    skipped: plan.skipped,
+  }
+  await writeAudit({
+    actorId,
+    action: 'directory.sync',
+    entityType: 'DirectoryConnection',
+    entityId: connection.provider,
+    after: outcome,
+  })
+  return outcome
+}
+
+function identityData(
+  connection: { provider: Provider; tenantId: string },
+  user: DirectoryUser,
+  employeeId: string,
+) {
+  return {
+    employeeId,
+    provider: connection.provider,
+    subject: user.id,
+    tenant: connection.tenantId,
+    email: addressOf(user),
+    directoryAccountEnabled: user.accountEnabled,
+  }
+}
+
+/**
+ * Creates the employee for someone signing in from the organization's
+ * Microsoft tenant who has none — after asking the directory that their
+ * account is real, enabled, a member and in the organization's domains.
+ * Returns null when it is not.
+ */
+export async function provisionFromDirectory(args: {
+  connection: { provider: Provider; tenantId: string; domains: string[] }
+  subject: string
+  directory?: Directory
+  now?: Date
+}): Promise<string | null> {
+  const directory = args.directory ?? (await directoryFor(args.connection))
+  const user = await directory.getUser(args.subject)
+  if (!user) return null
+
+  const plan = planDirectorySync({
+    users: [user],
+    employees: [],
+    domains: args.connection.domains,
+    autoProvision: true,
+  })
+  if (plan.create.length !== 1) return null
+
+  const today = args.now ?? new Date()
+  return db.$transaction(async (tx) => {
+    // The address may have been taken since the sign-in decision was made.
+    const existing = await tx.employee.findUnique({
+      where: { email: addressOf(user) },
+    })
+    if (existing) return null
+    const employee = await tx.employee.create({
+      data: employeeFromDirectoryUser(user, today),
+    })
+    await tx.identity.create({
+      data: identityData(args.connection, user, employee.id),
+    })
+    await writeAudit(
+      {
+        actorId: null,
+        action: 'employee.createFromDirectory',
+        entityType: 'Employee',
+        entityId: employee.id,
+        after: {
+          email: employee.email,
+          provider: args.connection.provider,
+          at: 'sign-in',
+        },
+      },
+      tx,
+    )
+    return employee.id
+  })
+}

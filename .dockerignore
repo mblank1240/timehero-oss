@@ -1,0 +1,14 @@
+.git
+.github
+node_modules
+.next
+.next-e2e
+test-results
+playwright-report
+blob-report
+coverage
+.mail-outbox*
+*.tsbuildinfo
+.env*
+!.env.example
+!.env.docker.example

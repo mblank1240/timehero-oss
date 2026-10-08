@@ -1,0 +1,141 @@
+name: Deploy
+
+# Deploys main to Azure App Service once CI has passed on it.
+#
+#   build the standalone bundle → migrate the database → deploy → smoke test
+#
+# Signs in to Azure as the deploy identity infra/main.bicep creates, by OIDC:
+# no credential is stored in GitHub, and Azure accepts only runs in the
+# `production` environment of this repository.
+#
+# Needs these repository (or `production` environment) variables, all of
+# which are outputs of the Bicep deployment — docs/AZURE-SETUP.md:
+#   AZURE_CLIENT_ID  AZURE_TENANT_ID  AZURE_SUBSCRIPTION_ID  AZURE_RESOURCE_GROUP
+#   AZURE_WEBAPP_NAME  AZURE_KEY_VAULT  AZURE_POSTGRES_SERVER  APP_BASE_URL
+# Until AZURE_CLIENT_ID exists every run skips with a notice.
+#
+# Migrations run before the new code starts, so the old code briefly runs
+# against the new schema. Every migration must therefore be safe for the
+# release before it: add, backfill, and only drop in a later release. See
+# "Migrations run from the deploy, before the code" in docs/DECISIONS.md.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  not-configured:
+    if: vars.AZURE_CLIENT_ID == ''
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "::notice::Azure is not configured yet; skipping. See docs/AZURE-SETUP.md."
+
+  deploy:
+    # A manual run, or CI passing on a push to main — not on a pull request
+    # whose CI happened to run against main.
+    if: >-
+      vars.AZURE_CLIENT_ID != '' && (
+        github.event_name == 'workflow_dispatch' ||
+        (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+      )
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.APP_BASE_URL }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+      WEBAPP: ${{ vars.AZURE_WEBAPP_NAME }}
+      KEY_VAULT: ${{ vars.AZURE_KEY_VAULT }}
+      POSTGRES_SERVER: ${{ vars.AZURE_POSTGRES_SERVER }}
+      BASE_URL: ${{ vars.APP_BASE_URL }}
+      FIREWALL_RULE: github-deploy-${{ github.run_id }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The commit CI passed on, not whatever main is by now.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build
+        env:
+          # lib/env.ts parses these at build time; the real values are read
+          # at runtime from App Service, which gets them from Key Vault.
+          DATABASE_URL: postgresql://build@localhost:5432/build
+          AUTH_SECRET: build-only-not-used-at-runtime
+        run: npm run build
+
+      - name: Assemble the package
+        run: |
+          set -euo pipefail
+          # Standalone output leaves out the static assets and public/,
+          # which the server still serves.
+          cp -r public .next/standalone/public
+          cp -r .next/static .next/standalone/.next/static
+          (cd .next/standalone && zip -qr "$GITHUB_WORKSPACE/release.zip" .)
+          ls -lh release.zip
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Open the database firewall to this runner
+        run: |
+          set -euo pipefail
+          ip="$(curl -fsS https://api.ipify.org)"
+          az postgres flexible-server firewall-rule create \
+            --resource-group "$RESOURCE_GROUP" --name "$POSTGRES_SERVER" \
+            --rule-name "$FIREWALL_RULE" --start-ip-address "$ip" --end-ip-address "$ip" \
+            --output none
+
+      - name: Migrate
+        run: |
+          set -euo pipefail
+          url="$(az keyvault secret show --vault-name "$KEY_VAULT" --name DATABASE-URL --query value -o tsv)"
+          echo "::add-mask::$url"
+          DATABASE_URL="$url" npx prisma migrate deploy
+
+      - name: Close the database firewall
+        if: always()
+        run: |
+          az postgres flexible-server firewall-rule delete \
+            --resource-group "$RESOURCE_GROUP" --name "$POSTGRES_SERVER" \
+            --rule-name "$FIREWALL_RULE" --yes --output none || true
+
+      - name: Deploy
+        run: |
+          az webapp deploy --resource-group "$RESOURCE_GROUP" --name "$WEBAPP" \
+            --src-path release.zip --type zip --async false --output none
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          # The new instance needs a moment to start; App Service keeps the
+          # old one serving until it answers its health check.
+          curl --fail-with-body --silent --show-error \
+            --retry 12 --retry-delay 10 --retry-all-errors --max-time 30 \
+            "$BASE_URL/api/health"
+          echo ""
+          curl --silent --show-error --output /dev/null --write-out "sign-in page: %{http_code}\n" \
+            --fail "$BASE_URL/signin"

@@ -1,0 +1,121 @@
+name: Scheduled jobs
+
+# The accrual, rollover, expiry, timesheet and notification jobs, run by posting to the authenticated
+# routes under /api/jobs. A scheduled workflow hitting the deployed app keeps
+# everything in one repo with its logs beside the deploy logs — see
+# "GitHub Actions cron over Azure Functions" in docs/DECISIONS.md.
+#
+# Needs two things configured on the repository (docs/AZURE-SETUP.md, step 4):
+#   vars.APP_BASE_URL    e.g. https://timehero.azurewebsites.net
+#   secrets.JOBS_SECRET  the same value as the app's JOBS_SECRET
+# Until both exist every run skips with a notice rather than failing nightly.
+#
+# Each job takes the date it acts on and is idempotent, so a run that fires
+# late, or twice, changes nothing. A run that is missed entirely is recovered
+# by dispatching this workflow with that date, or from Admin → Jobs.
+
+on:
+  schedule:
+    # 07:00 UTC is 02:00/03:00 in America/New_York — the same calendar date in
+    # both zones, which matters because the jobs act on "today" in UTC.
+    - cron: '0 7 * * *'
+    # Pay-period generation only needs to keep 24 months ahead.
+    - cron: '0 6 * * 0'
+    # Notifications: approval reminders escalate by the hour, and approvers'
+    # digests go out at an hour the organization chooses. Quarter past, so it
+    # does not start at the same moment as the daily run.
+    - cron: '15 * * * *'
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Date to act on (YYYY-MM-DD). Defaults to today.'
+        required: false
+        type: string
+      job:
+        description: 'A single job to run, or all of the daily ones.'
+        required: false
+        default: daily
+        type: choice
+        options:
+          - daily
+          - accrue-pay-period
+          - benefit-year-rollover
+          - create-timesheets
+          - expire-lots
+          - generate-pay-periods
+          - send-notifications
+          - sync-directory
+
+concurrency:
+  group: scheduled-jobs
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide which jobs to run
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          CRON: ${{ github.event.schedule }}
+          CHOICE: ${{ inputs.job }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "schedule" ]; then
+            if [ "$CRON" = "0 6 * * 0" ]; then
+              jobs="generate-pay-periods"
+            elif [ "$CRON" = "15 * * * *" ]; then
+              jobs="send-notifications"
+            else
+              # Order matters on one day a year: a lot expiring on the old
+              # year's last day is settled before the rollover reads the
+              # balance. The engine copes with either order, but this is the
+              # one that reads correctly in an employee's history.
+              jobs="expire-lots benefit-year-rollover accrue-pay-period create-timesheets sync-directory"
+            fi
+          elif [ "$CHOICE" = "daily" ] || [ -z "$CHOICE" ]; then
+            jobs="expire-lots benefit-year-rollover accrue-pay-period create-timesheets sync-directory"
+          else
+            jobs="$CHOICE"
+          fi
+          echo "jobs=$jobs" >> "$GITHUB_OUTPUT"
+
+      - name: Run them
+        env:
+          BASE_URL: ${{ vars.APP_BASE_URL }}
+          JOBS_SECRET: ${{ secrets.JOBS_SECRET }}
+          DATE: ${{ inputs.date }}
+          JOBS: ${{ steps.plan.outputs.jobs }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${BASE_URL:-}" ] || [ -z "${JOBS_SECRET:-}" ]; then
+            echo "::notice::APP_BASE_URL or JOBS_SECRET is not configured yet; skipping. See Phase 9 in docs/ROADMAP.md."
+            exit 0
+          fi
+
+          query=""
+          if [ -n "${DATE:-}" ]; then query="?date=$DATE"; fi
+
+          failed=0
+          for job in $JOBS; do
+            echo "::group::$job"
+            # --fail-with-body so a 4xx/5xx is a failure but the JSON body is
+            # still printed; the response says what the run actually did.
+            if curl --fail-with-body --silent --show-error --location \
+                 --retry 3 --retry-delay 10 --retry-all-errors \
+                 --max-time 300 \
+                 -X POST \
+                 -H "Authorization: Bearer $JOBS_SECRET" \
+                 "$BASE_URL/api/jobs/$job$query"; then
+              echo ""
+            else
+              echo ""
+              echo "::error::$job failed"
+              failed=1
+            fi
+            echo "::endgroup::"
+          done
+
+          exit $failed

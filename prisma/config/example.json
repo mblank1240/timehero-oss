@@ -1,0 +1,143 @@
+{
+  "organization": {
+    "name": "Example Community Church",
+    "timezone": "America/New_York",
+    "benefitYearStartMonth": 1,
+    "benefitYearStartDay": 1,
+    "minimumRequestIncrementMinutes": 240,
+    "allowSubIncrementWhenBalanceIsLower": true,
+    "timesheetIncrementMinutes": 15,
+    "displayUnit": "DAYS",
+    "compTimeMultiplierBps": 10000,
+    "overtimeWeeklyThresholdMinutes": 2400,
+    "mailFromAddress": null
+  },
+  "departments": [
+    "Administration",
+    "Facilities",
+    "Music",
+    "Youth"
+  ],
+  "paySchedule": {
+    "name": "Biweekly",
+    "type": "BIWEEKLY",
+    "payDateOffsetDays": 5,
+    "developmentAnchorDate": "2026-01-04"
+  },
+  "holidays": [
+    {
+      "date": "2026-01-01",
+      "name": "New Year's Day"
+    },
+    {
+      "date": "2026-04-03",
+      "name": "Good Friday"
+    },
+    {
+      "date": "2026-05-25",
+      "name": "Memorial Day"
+    },
+    {
+      "date": "2026-07-03",
+      "name": "Independence Day (observed)"
+    },
+    {
+      "date": "2026-09-07",
+      "name": "Labor Day"
+    },
+    {
+      "date": "2026-11-26",
+      "name": "Thanksgiving"
+    },
+    {
+      "date": "2026-11-27",
+      "name": "Day after Thanksgiving"
+    },
+    {
+      "date": "2026-12-25",
+      "name": "Christmas Day"
+    }
+  ],
+  "leaveTypes": [
+    {
+      "code": "PTO",
+      "name": "PTO",
+      "colorHex": "#1d4ed8",
+      "sortOrder": 1,
+      "countsTowardRollover": true
+    },
+    {
+      "code": "SICK",
+      "name": "Sick",
+      "colorHex": "#b45309",
+      "sortOrder": 2,
+      "countsTowardRollover": true
+    },
+    {
+      "code": "COMP",
+      "name": "Comp Time",
+      "colorHex": "#047857",
+      "sortOrder": 3,
+      "countsTowardRollover": false,
+      "accruableBy": "EXEMPT_ONLY",
+      "bankOvertime": true
+    }
+  ],
+  "policies": [
+    {
+      "leaveType": "PTO",
+      "name": "Standard",
+      "method": "ANNUAL_LUMP",
+      "annualMinutes": 4800,
+      "waitingPeriodDays": 90,
+      "firstYearGrant": "FULL_AFTER_WAITING"
+    },
+    {
+      "leaveType": "PTO",
+      "name": "5+ Years",
+      "method": "ANNUAL_LUMP",
+      "annualMinutes": 7200,
+      "waitingPeriodDays": 90,
+      "firstYearGrant": "FULL_AFTER_WAITING"
+    },
+    {
+      "leaveType": "SICK",
+      "name": "Standard",
+      "method": "ANNUAL_LUMP",
+      "annualMinutes": 4800,
+      "waitingPeriodDays": 0,
+      "firstYearGrant": "FULL_AFTER_WAITING"
+    }
+  ],
+  "rolloverRules": [
+    {
+      "leaveType": "PTO",
+      "capBasis": "EMPLOYEE_DAYS",
+      "capValue": 5
+    },
+    {
+      "leaveType": "SICK",
+      "capBasis": "EMPLOYEE_DAYS",
+      "capValue": 60
+    },
+    {
+      "leaveType": "COMP",
+      "capBasis": "NONE",
+      "capValue": 0
+    }
+  ],
+  "carryoverWindows": [
+    {
+      "leaveType": "COMP",
+      "name": "December comp grace period",
+      "earnedFromMonth": 12,
+      "earnedFromDay": 1,
+      "earnedToMonth": 12,
+      "earnedToDay": 31,
+      "usableUntilMonth": 2,
+      "usableUntilDay": 28,
+      "usableUntilYearOffset": 1,
+      "capBasis": "UNLIMITED"
+    }
+  ]
+}

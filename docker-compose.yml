@@ -1,0 +1,69 @@
+# TimeHero with PostgreSQL and its scheduled jobs. docs/SELF-HOSTING.md is the
+# walkthrough:
+#
+#   cp .env.docker.example .env.docker      # then fill it in
+#   docker compose up -d                    # database, migrations, app, jobs
+#   docker compose run --rm tools npm run setup -- --config prisma/config/example.json ...
+#
+# The app listens on port 3000. Put it behind a reverse proxy that terminates
+# HTTPS (Caddy, nginx, Traefik): sign-in cookies and push need it.
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    env_file: .env.docker
+    environment:
+      POSTGRES_USER: timehero
+      POSTGRES_DB: timehero
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U timehero -d timehero']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # Applies any pending migrations, then exits. The app waits for it.
+  migrate:
+    build: { context: ., target: tools }
+    image: timehero-tools
+    env_file: .env.docker
+    command: ['npx', 'prisma', 'migrate', 'deploy']
+    depends_on:
+      db: { condition: service_healthy }
+
+  app:
+    build: { context: ., target: app }
+    image: timehero
+    restart: unless-stopped
+    env_file: .env.docker
+    ports:
+      - '${TIMEHERO_PORT:-3000}:3000'
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+
+  # Posts to the job routes on the timetable in docker/scheduler.mjs.
+  jobs:
+    build: { context: ., target: app }
+    image: timehero
+    restart: unless-stopped
+    env_file: .env.docker
+    command: ['node', 'docker/scheduler.mjs']
+    depends_on:
+      app: { condition: service_healthy }
+
+  # `docker compose run --rm tools <command>`: setup, the import, Prisma.
+  tools:
+    build: { context: ., target: tools }
+    image: timehero-tools
+    env_file: .env.docker
+    profiles: [tools]
+    volumes:
+      - ./prisma/config:/app/prisma/config:ro
+      - ./import:/app/import:ro
+    depends_on:
+      db: { condition: service_healthy }
+
+volumes:
+  db:

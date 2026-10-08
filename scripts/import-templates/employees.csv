@@ -1,0 +1,4 @@
+email,first_name,last_name,role,employment_type,hire_date,termination_date,department,pay_schedule,standard_day,policies,approvers
+pat.leader@example.org,Pat,Leader,ADMIN,SALARIED_EXEMPT,2015-07-01,,Administration,,8h,PTO:5+ Years; SICK:Standard,
+sam.staff@example.org,Sam,Staff,EMPLOYEE,HOURLY,2024-01-15,,Facilities,,,PTO:Standard; SICK:Standard,pat.leader@example.org
+jo.parttime@example.org,Jo,Parttime,EMPLOYEE,HOURLY,2025-03-03,,Facilities,,4h,PTO:Standard=44h; SICK:Standard,pat.leader@example.org

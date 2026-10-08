@@ -1,0 +1,132 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/timehero_test
+  AUTH_SECRET: ci-only-secret-not-used-for-anything-real
+  DEV_AUTH_BYPASS: 'true'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: timehero_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Apply migrations
+        run: npm run db:deploy
+
+      - name: Seed
+        run: npm run db:seed
+
+      - name: Typecheck and lint
+        run: npm run check
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Integration tests
+        run: npm run test:integration
+
+      - name: Production build
+        run: npm run build
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: npm run test:e2e
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # The self-hosting path: the image builds, the compose stack comes up with
+  # migrations applied, setup creates an organization, and the app answers.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Environment
+        run: |
+          cat > .env.docker <<'ENV'
+          POSTGRES_PASSWORD=ci-only
+          DATABASE_URL=postgresql://timehero:ci-only@db:5432/timehero
+          APP_URL=http://localhost:3000
+          AUTH_URL=http://localhost:3000
+          AUTH_SECRET=ci-only-secret-not-used-for-anything-real
+          JOBS_SECRET=ci-only-jobs-secret
+          AUTH_EMAIL_LINKS=true
+          MAIL_TRANSPORT=smtp
+          SMTP_URL=smtp://localhost:2525
+          ENV
+
+      - name: Build and start
+        run: docker compose up -d --build
+
+      - name: Wait for the app
+        run: |
+          for i in $(seq 60); do
+            if curl -fsS http://localhost:3000/api/health; then echo; exit 0; fi
+            sleep 5
+          done
+          docker compose ps -a
+          docker compose logs
+          exit 1
+
+      - name: Set up an organization
+        run: |
+          docker compose run --rm tools npm run setup -- \
+            --config prisma/config/example.json \
+            --admin-email admin@example.org --admin-first-name Ada --admin-last-name Lovelace \
+            --pay-anchor 2026-01-04 --mail-from time@example.org
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          curl -fsS -o /dev/null -w "sign-in page: %{http_code}\n" http://localhost:3000/signin
+          curl -fsS -X POST -H "Authorization: Bearer ci-only-jobs-secret" \
+            "http://localhost:3000/api/jobs/generate-pay-periods"
+          echo
+          docker compose logs jobs | grep -q "Scheduler posting to"
+
+      - name: Logs
+        if: failure()
+        run: docker compose logs

@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f8fafc;
+  --surface: #ffffff;
+  --foreground: #0f172a;
+  --muted: #64748b;
+  --border: #e2e8f0;
+  --accent: #1d4ed8;
+  --accent-contrast: #ffffff;
+  --danger: #b91c1c;
+  --danger-surface: #fef2f2;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0b1220;
+    --surface: #111a2e;
+    --foreground: #e8eefc;
+    --muted: #93a3bf;
+    --border: #1f2c47;
+    --accent: #6c9cff;
+    --accent-contrast: #0b1220;
+    --danger: #fca5a5;
+    --danger-surface: #2a1414;
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-danger: var(--danger);
+  --color-danger-surface: var(--danger-surface);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+@layer components {
+  .th-card {
+    @apply rounded-lg border border-border bg-surface;
+  }
+
+  .th-label {
+    @apply block text-sm font-medium text-foreground;
+  }
+
+  .th-input {
+    @apply mt-1 block w-full rounded-md border border-border bg-surface px-3 py-2 text-sm
+      text-foreground outline-none focus:border-accent focus:ring-2 focus:ring-accent/30;
+  }
+
+  .th-btn {
+    @apply inline-flex items-center justify-center rounded-md bg-accent px-4 py-2 text-sm
+      font-medium text-accent-contrast transition hover:opacity-90
+      disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .th-btn-secondary {
+    @apply inline-flex items-center justify-center rounded-md border border-border bg-surface
+      px-4 py-2 text-sm font-medium text-foreground transition hover:border-accent
+      disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .th-error {
+    @apply rounded-md border border-danger/40 bg-danger-surface px-3 py-2 text-sm text-danger;
+  }
+
+  .th-field-error {
+    @apply mt-1 text-xs text-danger;
+  }
+}

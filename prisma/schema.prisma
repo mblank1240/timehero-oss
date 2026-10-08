@@ -1,0 +1,1138 @@
+// TimeHero schema.
+// Phases 1-2: people, auth, and the configuration layer — pay schedules,
+// holidays, leave types, policies, rollover rules and carryover windows.
+// Phase 3: the append-only ledger and the scheduled-job record.
+// Phase 4: leave requests and the approval steps they move through.
+// Phase 6: overtime logs, which bank comp time through the same steps.
+// Phase 7: timesheets for hourly staff, the third subject of those steps.
+// See docs/DATA-MODEL.md for the reasoning behind all of it.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  EMPLOYEE
+  ADMIN
+  /// An employee who can also read and export reports — timesheets for
+  /// payroll among them — but change nothing: no settings, no approvals
+  /// outside their own chain position, no unlocks.
+  FINANCE
+}
+
+enum EmploymentType {
+  HOURLY
+  SALARIED_EXEMPT
+}
+
+enum DisplayUnit {
+  HOURS
+  DAYS
+}
+
+enum PayScheduleType {
+  WEEKLY
+  BIWEEKLY
+  SEMI_MONTHLY
+  MONTHLY
+}
+
+enum AccrualMethod {
+  /// The whole annual allotment lands at once — the church's current rule.
+  ANNUAL_LUMP
+  /// Spread across the year's pay periods, computed from a cumulative target
+  /// so the year-end total is exact. See docs/DATA-MODEL.md.
+  PER_PAY_PERIOD
+}
+
+/// What a new hire receives in the benefit year they are hired.
+enum FirstYearGrant {
+  /// The complete annual allotment once the waiting period ends. This is the
+  /// church's rule: the full allotment 120 days after the start date.
+  FULL_AFTER_WAITING
+  /// A share based on how much of the year remains.
+  PRORATE
+  /// Nothing until the next benefit year begins.
+  NONE
+}
+
+enum AccruableBy {
+  ALL
+  HOURLY_ONLY
+  /// Comp time. FLSA bars private employers from giving non-exempt staff comp
+  /// time in lieu of overtime pay — see rule 4 in CLAUDE.md.
+  EXEMPT_ONLY
+}
+
+/// How a rollover or carryover cap is expressed.
+enum CapBasis {
+  /// Nothing carries over.
+  NONE
+  /// Everything carries over.
+  UNLIMITED
+  /// A fixed number of minutes, the same for everyone.
+  FIXED_MINUTES
+  /// A number of the employee's OWN working days. "5 days" is 2400 minutes at
+  /// 480/day and 1200 at 240/day — a fixed minute cap would hand part-timers
+  /// disproportionately more rollover.
+  EMPLOYEE_DAYS
+}
+
+/// Single-row table. Guarded by a CHECK constraint in the migration so a
+/// second row cannot be inserted.
+model OrgSettings {
+  id       Int    @id @default(1)
+  name     String
+  timezone String @default("America/New_York")
+
+  benefitYearStartMonth Int @default(1)
+  benefitYearStartDay   Int @default(1)
+
+  /// Leave requests must be a positive multiple of this. 240 = half an 8h day.
+  minimumRequestIncrementMinutes      Int     @default(240)
+  /// Lets an employee spend a remainder smaller than one increment, so small
+  /// balances aren't stranded forever. See docs/SPEC.md.
+  allowSubIncrementWhenBalanceIsLower Boolean @default(true)
+  /// Worked time on timesheets — deliberately finer than the leave increment.
+  timesheetIncrementMinutes           Int     @default(15)
+
+  displayUnit DisplayUnit @default(DAYS)
+
+  /// Basis points so comp-time maths stays integral. 10000 = 1.0x.
+  compTimeMultiplierBps          Int @default(10000)
+  overtimeWeeklyThresholdMinutes Int @default(2400)
+
+  /// The leave type approved overtime is banked into. Null switches overtime
+  /// logging off. Must be an `EXEMPT_ONLY` type — checked when it is saved and
+  /// again when a log is approved (rule 4).
+  compLeaveTypeId      String?
+  compLeaveType        LeaveType? @relation("CompLeaveType", fields: [compLeaveTypeId], references: [id], onDelete: SetNull)
+  /// Banked comp expires this many days after the day it was worked, and the
+  /// daily `expire-lots` job forfeits what is left. Null never expires on its
+  /// own — the rollover rule and carryover windows still apply.
+  compExpiresAfterDays Int?
+
+  /// ISO weekdays the org normally works, 1 = Monday … 7 = Sunday. Only the
+  /// request form's defaults read it: a range that spans a weekend starts with
+  /// the weekend set to no leave, so nobody is charged for a Saturday by
+  /// accident. Any day may still be requested — a church works Sundays.
+  workWeekDays Int[] @default([1, 2, 3, 4, 5])
+
+  /// ISO weekday the FLSA workweek starts on, 1 = Monday … 7 = Sunday.
+  /// Overtime is counted per workweek, and a workweek is fixed by the
+  /// employer — it need not line up with the pay period.
+  workweekStartDay Int @default(7)
+
+  /// A timesheet is due by the end of this many days after its pay period's
+  /// last day, in the org's timezone. Late ones are still accepted — they are
+  /// marked late, not refused.
+  timesheetDueDaysAfterPeriodEnd Int @default(3)
+
+  // --- Notifications (Phase 8) ---------------------------------------------
+
+  /// The address TimeHero sends email from. Null sends no email at all —
+  /// notifications go by push and the in-app list only, and emailed sign-in
+  /// links are not offered. How mail leaves (Graph or SMTP, and SMTP's
+  /// credentials) stays in the environment, with the operator.
+  mailFromAddress String?
+
+  /// The notification types switched on for everyone. One that is off is
+  /// not created at all — no push, no email, nothing in the list.
+  notificationTypesEnabled NotificationType[] @default([APPROVAL_WAITING, REQUEST_DECIDED, TIMESHEET_DUE, TIMESHEET_OVERDUE, ROLLOVER_SUMMARY])
+
+  /// Something left waiting on an approver is announced once, then reminded
+  /// every `approvalReminderIntervalHours` once it has waited
+  /// `approvalReminderAfterDays`, and every `approvalEscalateIntervalHours`
+  /// once it has waited a further `approvalEscalateAfterDays`.
+  approvalReminderAfterDays     Int @default(7)
+  approvalReminderIntervalHours Int @default(24)
+  approvalEscalateAfterDays     Int @default(3)
+  approvalEscalateIntervalHours Int @default(4)
+
+  /// An open timesheet is reminded this many days before its period ends.
+  timesheetReminderDaysBeforePeriodEnd Int @default(2)
+
+  /// The hour of the day, in the org's timezone, approvers who chose a daily
+  /// digest are sent it.
+  approverDigestHour Int @default(7)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("org_settings")
+}
+
+model Department {
+  id   String @id @default(cuid())
+  name String @unique
+
+  employees Employee[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("departments")
+}
+
+model Employee {
+  id String @id @default(cuid())
+
+  email     String @unique
+  firstName String
+  lastName  String
+
+  role           Role           @default(EMPLOYEE)
+  employmentType EmploymentType
+
+  hireDate        DateTime  @db.Date
+  terminationDate DateTime? @db.Date
+
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+
+  /// What "a day" means for this person. Drives the request increment picker
+  /// and day-based rollover caps.
+  standardMinutesPerDay Int @default(480)
+
+  isActive Boolean @default(true)
+
+  /// Set on an employee created from the organization's directory, or one
+  /// whose directory account has since been disabled. Nothing about it is
+  /// trusted yet — hire date, employment type, pay schedule and leave
+  /// policies are for an administrator to confirm. Saving the employee's
+  /// record clears it.
+  needsReview Boolean @default(false)
+
+  /// Email about things waiting on this person as approver once a day, as a
+  /// digest, instead of one email each. Push and the in-app list are not
+  /// affected.
+  approvalDigest Boolean @default(false)
+
+  payScheduleId String?
+  paySchedule   PaySchedule? @relation(fields: [payScheduleId], references: [id], onDelete: SetNull)
+
+  approvalChain      ApprovalChainStep[]      @relation("ChainOwner")
+  approverFor        ApprovalChainStep[]      @relation("ChainApprover")
+  auditLogs          AuditLog[]
+  leavePolicies      EmployeeLeavePolicy[]
+  ledgerEntries      LedgerEntry[]            @relation("LedgerEmployee")
+  ledgerEntriesAdded LedgerEntry[]            @relation("LedgerCreatedBy")
+  leaveRequests      LeaveRequest[]
+  overtimeLogs       OvertimeLog[]
+  timesheets         Timesheet[]
+  identities         Identity[]
+  signInLinks        SignInLinkRequest[]
+  directoriesLinked  DirectoryConnection[]
+  approvalSteps      ApprovalStep[]           @relation("StepApprover")
+  stepsDecided       ApprovalStep[]           @relation("StepDecidedBy")
+  notifications      Notification[]
+  notificationPrefs  NotificationPreference[]
+  pushSubscriptions  PushSubscription[]
+  digests            NotificationDigest[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive])
+  @@index([departmentId])
+  @@index([payScheduleId])
+  @@map("employees")
+}
+
+// ---------------------------------------------------------------------------
+// Calendar
+// ---------------------------------------------------------------------------
+
+model PaySchedule {
+  id   String          @id @default(cuid())
+  name String          @unique
+  type PayScheduleType
+
+  /// The first period's start date. Every period is generated from here, so
+  /// changing it reshapes the calendar — only future unlocked periods are
+  /// regenerated.
+  anchorDate DateTime @db.Date
+
+  /// Days after a period's end date that payment lands.
+  payDateOffsetDays Int @default(0)
+
+  isDefault Boolean @default(false)
+  isActive  Boolean @default(true)
+
+  periods   PayPeriod[]
+  employees Employee[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("pay_schedules")
+}
+
+/// Periods are stored rows, not computed on demand. Computed periods would
+/// shift retroactively the moment a schedule is edited, silently re-dating
+/// historical accruals.
+model PayPeriod {
+  id String @id @default(cuid())
+
+  payScheduleId String
+  paySchedule   PaySchedule @relation(fields: [payScheduleId], references: [id], onDelete: Cascade)
+
+  startDate DateTime @db.Date
+  /// Inclusive.
+  endDate   DateTime @db.Date
+  payDate   DateTime @db.Date
+
+  /// Set once timesheets for the period are approved. Locked periods are
+  /// never regenerated by a schedule change.
+  isLocked Boolean @default(false)
+
+  /// A period with timesheets is never redrawn or removed either, locked or
+  /// not: the hours on them were entered against these dates.
+  timesheets Timesheet[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([payScheduleId, startDate])
+  @@index([payScheduleId, endDate])
+  @@map("pay_periods")
+}
+
+model Holiday {
+  id   String   @id @default(cuid())
+  date DateTime @db.Date
+  name String
+
+  /// Paid hours for the day, as minutes. Excluded from leave-day counting.
+  minutes Int @default(480)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([date])
+  @@map("holidays")
+}
+
+// ---------------------------------------------------------------------------
+// Leave configuration
+//
+// Everything here is data an administrator edits. No church-specific number
+// belongs in code — see rule 1 in CLAUDE.md, and docs/CONFIGURATION.md for how
+// an organization's starting values are loaded.
+// ---------------------------------------------------------------------------
+
+model LeaveType {
+  id   String @id @default(cuid())
+  /// Stable identifier used by seeds and reports: PTO, SICK, COMP, or custom.
+  code String @unique
+  name String
+
+  isPaid                Boolean @default(true)
+  requiresApproval      Boolean @default(true)
+  allowsNegativeBalance Boolean @default(false)
+
+  /// Whether a balance of this type survives the benefit-year boundary at all,
+  /// before any cap or carryover window is applied.
+  countsTowardRollover Boolean @default(true)
+
+  accruableBy AccruableBy @default(ALL)
+
+  /// Used by the history heatmap.
+  colorHex String @default("#1d4ed8")
+
+  sortOrder Int     @default(0)
+  isActive  Boolean @default(true)
+
+  policies         LeavePolicy[]
+  rolloverRule     RolloverRule?
+  carryoverWindows CarryoverWindow[]
+  ledgerEntries    LedgerEntry[]
+  leaveRequests    LeaveRequest[]
+  timeEntries      TimeEntry[]
+  compFor          OrgSettings[]     @relation("CompLeaveType")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("leave_types")
+}
+
+model LeavePolicy {
+  id   String @id @default(cuid())
+  name String
+
+  leaveTypeId String
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+
+  method AccrualMethod
+
+  /// The yearly allotment in minutes. An assignment may override it.
+  annualMinutes Int
+
+  /// An any-time ceiling: accrual pauses while the balance sits at or above
+  /// this. Null means no ceiling.
+  maxBalanceMinutes Int?
+
+  /// Days from the hire date before the first grant is due. The church uses
+  /// 120. The grant lands on max(benefitYearStart, hireDate + this).
+  waitingPeriodDays Int @default(0)
+
+  firstYearGrant FirstYearGrant @default(FULL_AFTER_WAITING)
+
+  isActive Boolean @default(true)
+
+  assignments EmployeeLeavePolicy[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([leaveTypeId, name])
+  @@index([leaveTypeId])
+  @@map("leave_policies")
+}
+
+/// Which policy an employee is on, and since when. Keeping history means a
+/// past accrual can still be explained by the policy in force at the time.
+model EmployeeLeavePolicy {
+  id String @id @default(cuid())
+
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  leavePolicyId String
+  leavePolicy   LeavePolicy @relation(fields: [leavePolicyId], references: [id], onDelete: Restrict)
+
+  /// Per-employee allotment, e.g. a long-serving staffer on the standard
+  /// policy at a higher figure. Null means use the policy's own.
+  annualMinutesOverride Int?
+
+  effectiveFrom DateTime  @db.Date
+  effectiveTo   DateTime? @db.Date
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([employeeId, leavePolicyId, effectiveFrom])
+  @@index([employeeId])
+  @@map("employee_leave_policies")
+}
+
+/// Org-wide, one per leave type.
+model RolloverRule {
+  id String @id @default(cuid())
+
+  leaveTypeId String    @unique
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+
+  capBasis CapBasis @default(NONE)
+  /// Minutes when FIXED_MINUTES, a day count when EMPLOYEE_DAYS, ignored
+  /// otherwise.
+  capValue Int      @default(0)
+
+  /// Carried time expires this many days into the new year. Null never expires.
+  carriedExpiresAfterDays Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("rollover_rules")
+}
+
+/// An exception that lets time earned in a defined window survive a rollover
+/// it would otherwise fail, usable for a limited period into the new year.
+///
+/// The church's comp-time rule is one row of this table: comp does not roll
+/// over, except what is earned in December, usable through February. Nothing
+/// about December or February appears in code.
+model CarryoverWindow {
+  id   String @id @default(cuid())
+  name String
+
+  leaveTypeId String
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+
+  /// Inclusive earning window, as month/day.
+  earnedFromMonth Int
+  earnedFromDay   Int
+  earnedToMonth   Int
+  earnedToDay     Int
+
+  /// Expiry in the new year. A day past the month's end clamps to the last
+  /// day, so 29 February resolves correctly in leap years.
+  usableUntilMonth      Int
+  usableUntilDay        Int
+  usableUntilYearOffset Int @default(1)
+
+  /// Optional cap on how much the window rescues. NONE means uncapped here,
+  /// since a window exists to permit carryover rather than forbid it.
+  capBasis CapBasis @default(UNLIMITED)
+  capValue Int      @default(0)
+
+  isActive Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([leaveTypeId])
+  @@map("carryover_windows")
+}
+
+/// Ordered approvers for one employee. Step is 1-based and contiguous.
+model ApprovalChainStep {
+  id String @id @default(cuid())
+
+  employeeId String
+  employee   Employee @relation("ChainOwner", fields: [employeeId], references: [id], onDelete: Cascade)
+
+  step Int
+
+  approverId String
+  approver   Employee @relation("ChainApprover", fields: [approverId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([employeeId, step])
+  @@index([approverId])
+  @@map("approval_chain_steps")
+}
+
+model AuditLog {
+  id String @id @default(cuid())
+
+  /// Null for system-generated actions (scheduled jobs).
+  actorId String?
+  actor   Employee? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  action     String
+  entityType String
+  entityId   String
+
+  before Json?
+  after  Json?
+  reason String?
+
+  createdAt DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ---------------------------------------------------------------------------
+// The ledger
+//
+// A balance is never a stored number. It is SUM(minutes) over these rows
+// (rule 2 in CLAUDE.md). Nothing here is ever updated or deleted — a mistake
+// is corrected by posting a reversing entry, so the history of how a balance
+// got to where it is stays readable forever.
+// ---------------------------------------------------------------------------
+
+enum LedgerEntryKind {
+  /// The whole annual allotment, dated max(benefitYearStart, hireDate + wait).
+  LUMP_GRANT
+  /// One pay period's share, computed from a cumulative target.
+  PERIOD_ACCRUAL
+  /// Time kept across a benefit-year boundary. Always paired with the FORFEIT
+  /// that zeroes the old balance first — see docs/DATA-MODEL.md.
+  ROLLOVER_IN
+  /// Negative. Time removed by a rollover or an expiry.
+  FORFEIT
+  /// Negative. Approved leave.
+  USAGE
+  /// Positive. A cancelled or reversed request.
+  USAGE_REVERSAL
+  /// Positive. Approved overtime, at the org multiplier. Exempt staff only.
+  COMP_EARNED
+  /// A manual correction. Requires a note.
+  ADJUSTMENT
+}
+
+enum JobStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+/// Append-only. No `updatedAt`: a row that could change would make every
+/// historical balance unverifiable.
+model LedgerEntry {
+  id String @id @default(cuid())
+
+  employeeId String
+  employee   Employee @relation("LedgerEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+
+  leaveTypeId String
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+
+  /// Drives balance-as-of queries. DATE, not a timestamp (rule 7).
+  effectiveDate DateTime @db.Date
+
+  /// Signed. Grants positive; usage and forfeits negative.
+  minutes Int
+
+  kind LedgerEntryKind
+
+  /// Set on grants that expire — carried comp, time-limited awards. Null never
+  /// expires. `lotBalances()` consumes soonest-expiring first.
+  expiresOn DateTime? @db.Date
+
+  /// Idempotency key: `2026-PP07`, `2026-ROLLOVER`, `<lotId>-EXPIRY`. Null for
+  /// manual entries and anything not written by a job.
+  periodKey String?
+
+  /// Polymorphic link to what the entry is for: a LeaveRequest, an
+  /// OvertimeLog, or the LeavePolicy a job granted under.
+  sourceType String?
+  sourceId   String?
+
+  /// The run of a scheduled job that wrote this entry. Null for entries made
+  /// by people — requests, overtime, adjustments, the opening-balance import.
+  /// Every job sets it, so "reverse this run" (Phase 10) is one query; it
+  /// cannot be backfilled, which is why it arrived before real data did.
+  jobRunId String?
+  jobRun   JobRun? @relation(fields: [jobRunId], references: [id], onDelete: Restrict)
+
+  /// Required for ADJUSTMENT — enforced by a CHECK constraint in the migration.
+  note String?
+
+  /// Null for system-generated entries.
+  createdById String?
+  createdBy   Employee? @relation("LedgerCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  /// What makes a re-run of any job safe. Postgres treats NULLs as distinct,
+  /// so this constrains job-written rows only and leaves manual entries free.
+  @@unique([employeeId, leaveTypeId, kind, periodKey])
+  @@index([employeeId, leaveTypeId, effectiveDate])
+  @@index([leaveTypeId, effectiveDate])
+  @@index([expiresOn])
+  @@index([jobRunId])
+  @@map("ledger_entries")
+}
+
+/// One row per execution of a scheduled job, successful or not. The place to
+/// look when someone asks why an accrual is missing.
+model JobRun {
+  id String @id @default(cuid())
+
+  jobName   String
+  /// The period the run acted on, for jobs that have one.
+  periodKey String?
+
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+
+  status         JobStatus @default(RUNNING)
+  entriesCreated Int       @default(0)
+
+  /// What the run did, on a success: how many employees it considered, how
+  /// much it proposed, how much the idempotency keys skipped. Kept apart from
+  /// `error` so a run log never shows a successful summary in the column
+  /// someone is scanning for failures.
+  detail Json?
+  /// Set only on a failure.
+  error  String?
+
+  /// What the run wrote. Restrict on delete: a run with ledger rows is history.
+  ledgerEntries LedgerEntry[]
+
+  @@index([jobName, startedAt])
+  @@map("job_runs")
+}
+
+// ---------------------------------------------------------------------------
+// Leave requests
+//
+// A request is a set of dated days and a snapshot of the approval chain taken
+// at submission. Nothing touches the ledger until the last step approves; then
+// one USAGE entry is written per day. Cancelling an approved request writes
+// USAGE_REVERSAL entries and leaves the originals in place (rule 2).
+// ---------------------------------------------------------------------------
+
+enum LeaveRequestStatus {
+  /// Reserved for a saved-but-unsubmitted request. Nothing creates one yet.
+  DRAFT
+  PENDING
+  APPROVED
+  DENIED
+  CANCELLED
+}
+
+enum ApprovalStepStatus {
+  PENDING
+  APPROVED
+  DENIED
+  /// Not acted on: the approver was the requester, an administrator skipped
+  /// it, or the request was resolved before it was reached.
+  SKIPPED
+}
+
+model LeaveRequest {
+  id String @id @default(cuid())
+
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  leaveTypeId String
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+
+  status LeaveRequestStatus @default(PENDING)
+
+  /// Sum of the days, kept on the row so lists need not aggregate. Always
+  /// equal to SUM(days.minutes) — both are written together and never edited.
+  totalMinutes Int
+
+  note String?
+
+  submittedAt DateTime? @db.Timestamptz
+  /// When it reached APPROVED, DENIED or CANCELLED.
+  resolvedAt  DateTime? @db.Timestamptz
+
+  days        LeaveRequestDay[]
+  steps       ApprovalStep[]
+  timeEntries TimeEntry[]
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  @@index([employeeId, status])
+  @@index([status])
+  @@map("leave_requests")
+}
+
+/// One requested day. Validated against the org increment at submission, with
+/// the single stranded-balance exception — see docs/DATA-MODEL.md.
+model LeaveRequestDay {
+  id String @id @default(cuid())
+
+  leaveRequestId String
+  leaveRequest   LeaveRequest @relation(fields: [leaveRequestId], references: [id], onDelete: Cascade)
+
+  /// DATE, not a timestamp (rule 7).
+  date    DateTime @db.Date
+  minutes Int
+
+  @@unique([leaveRequestId, date])
+  @@index([date])
+  @@map("leave_request_days")
+}
+
+/// The approval chain as it stood when the request was submitted. Later edits
+/// to the employee's chain do not rewrite it.
+model ApprovalStep {
+  id String @id @default(cuid())
+
+  /// Exactly one subject — a leave request, an overtime log or a timesheet.
+  /// A CHECK constraint in the migration enforces "exactly one".
+  leaveRequestId String?
+  leaveRequest   LeaveRequest? @relation(fields: [leaveRequestId], references: [id], onDelete: Cascade)
+
+  overtimeLogId String?
+  overtimeLog   OvertimeLog? @relation(fields: [overtimeLogId], references: [id], onDelete: Cascade)
+
+  timesheetId String?
+  timesheet   Timesheet? @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+
+  /// 1-based, contiguous, in the order the steps are acted on. A timesheet
+  /// that is rejected or unlocked and submitted again keeps its old steps and
+  /// numbers the new ones after them, so its whole history stays readable.
+  step Int
+
+  /// Null means any administrator may act — the empty-chain case.
+  approverId String?
+  approver   Employee? @relation("StepApprover", fields: [approverId], references: [id], onDelete: Restrict)
+
+  status ApprovalStepStatus @default(PENDING)
+
+  /// Who actually decided, which differs from `approverId` when an
+  /// administrator overrides or the step was open to any administrator.
+  decidedById String?
+  decidedBy   Employee? @relation("StepDecidedBy", fields: [decidedById], references: [id], onDelete: SetNull)
+  decidedAt   DateTime? @db.Timestamptz
+  comment     String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  @@unique([leaveRequestId, step])
+  @@unique([overtimeLogId, step])
+  @@unique([timesheetId, step])
+  @@index([approverId, status])
+  @@map("approval_steps")
+}
+
+// ---------------------------------------------------------------------------
+// Overtime and comp time
+//
+// An exempt employee logs time worked beyond their normal hours; it moves
+// through a snapshot of their approval chain exactly as a leave request does,
+// and on the last approval a COMP_EARNED entry banks it at the org multiplier.
+// Spending it is an ordinary leave request. Hourly staff cannot log overtime
+// at all (rule 4) — a trigger in the migration refuses the row.
+// ---------------------------------------------------------------------------
+
+enum OvertimeLogStatus {
+  PENDING
+  APPROVED
+  DENIED
+  /// Withdrawn by the employee, or by an administrator, before a decision.
+  CANCELLED
+}
+
+model OvertimeLog {
+  id String @id @default(cuid())
+
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  /// The day the time was worked. DATE, not a timestamp (rule 7).
+  date DateTime @db.Date
+
+  /// Time actually worked beyond normal hours, a positive multiple of the
+  /// timesheet increment — not the leave increment.
+  minutes Int
+
+  /// What the time was for. Required: it is what the approver judges.
+  note String
+
+  status OvertimeLogStatus @default(PENDING)
+
+  /// The multiplier in force at final approval, in basis points.
+  multiplierBps Int?
+  /// What was banked on approval: `minutes` at the multiplier, less anything a
+  /// closed benefit year's rollover would already have forfeited. Equal to the
+  /// sum of the log's COMP_EARNED entries.
+  earnedMinutes Int?
+
+  submittedAt DateTime  @default(now()) @db.Timestamptz
+  /// When it reached APPROVED, DENIED or CANCELLED.
+  resolvedAt  DateTime? @db.Timestamptz
+
+  steps ApprovalStep[]
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  @@index([employeeId, status])
+  @@index([status])
+  @@map("overtime_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Timesheets
+//
+// One per hourly employee per pay period, created by the daily
+// `create-timesheets` job. The employee enters the time they worked each day;
+// approved leave and holidays are shown alongside, read-only, and frozen into
+// entries when the timesheet is submitted. Overtime is never entered: it is
+// computed from the workweek — see lib/timesheets/overtime.ts.
+// ---------------------------------------------------------------------------
+
+enum TimesheetStatus {
+  /// Being filled in. Also where an unlocked or withdrawn timesheet returns to.
+  OPEN
+  /// Waiting on its approval chain. Read-only.
+  SUBMITTED
+  /// Locked for the employee. Only an administrator's unlock reopens it.
+  APPROVED
+  /// Sent back by an approver. Editable, and submitted again from here.
+  REJECTED
+}
+
+enum TimeEntryCategory {
+  /// Time actually worked, entered by the employee. The only kind that counts
+  /// toward overtime.
+  REGULAR
+  /// A paid holiday, frozen from the holiday calendar at submission.
+  HOLIDAY
+  /// Approved leave, frozen from the request at submission.
+  LEAVE
+}
+
+model Timesheet {
+  id String @id @default(cuid())
+
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  payPeriodId String
+  payPeriod   PayPeriod @relation(fields: [payPeriodId], references: [id], onDelete: Restrict)
+
+  status TimesheetStatus @default(OPEN)
+
+  /// The latest submission. Kept when an administrator unlocks it.
+  submittedAt DateTime? @db.Timestamptz
+  /// When it reached APPROVED or REJECTED. Cleared when it opens again.
+  resolvedAt  DateTime? @db.Timestamptz
+
+  entries TimeEntry[]
+  steps   ApprovalStep[]
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  /// What lets the creation job run every day safely (rule 3).
+  @@unique([employeeId, payPeriodId])
+  @@index([payPeriodId, status])
+  @@index([status])
+  @@map("timesheets")
+}
+
+/// One line of a timesheet. Unlike the ledger these are edited freely while
+/// the timesheet is open; a trigger refuses any change once it is submitted.
+/// One REGULAR row per day and one LEAVE row per request per day, enforced by
+/// partial unique indexes in the migration.
+model TimeEntry {
+  id String @id @default(cuid())
+
+  timesheetId String
+  timesheet   Timesheet @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+
+  /// DATE, not a timestamp (rule 7).
+  date     DateTime          @db.Date
+  /// Positive, and for REGULAR a multiple of `timesheetIncrementMinutes`.
+  /// A day with nothing on it has no row.
+  minutes  Int
+  category TimeEntryCategory
+  note     String?
+
+  /// Set on LEAVE rows, and only there.
+  leaveRequestId String?
+  leaveRequest   LeaveRequest? @relation(fields: [leaveRequestId], references: [id], onDelete: Cascade)
+  leaveTypeId    String?
+  leaveType      LeaveType?    @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  @@index([timesheetId, date])
+  @@index([leaveRequestId])
+  @@map("time_entries")
+}
+
+// ---------------------------------------------------------------------------
+// Sign-in
+//
+// Nobody registers themselves. Every way in — Microsoft, Google, an emailed
+// link — ends at an Employee an administrator created, or one created from
+// the organization's own directory. See docs/AUTH-PLAN.md.
+// ---------------------------------------------------------------------------
+
+enum DirectoryProvider {
+  MICROSOFT
+  GOOGLE
+}
+
+/// An external account bound to an employee. Bound on the first sign-in (by
+/// verified email, within the organization's own tenant or domain) or by a
+/// directory sync, and matched on `subject` from then on, so a later email
+/// change does not lock anyone out.
+model Identity {
+  id String @id @default(cuid())
+
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  provider DirectoryProvider
+  /// The provider's stable user id: the Entra object id, or Google's `sub`.
+  subject  String
+  /// The Entra tenant or Google Workspace domain the account belongs to.
+  tenant   String?
+  /// The address the provider gave at the last sign-in or sync. Display only.
+  email    String?
+
+  /// From the last directory sync; null when the account was never synced.
+  directoryAccountEnabled Boolean?
+
+  createdAt  DateTime  @default(now()) @db.Timestamptz
+  lastUsedAt DateTime? @db.Timestamptz
+
+  @@unique([provider, subject])
+  @@index([employeeId])
+  @@map("identities")
+}
+
+/// The organization's own directory, registered by an administrator. With a
+/// Microsoft connection, staff signing in from that tenant are linked to
+/// their employee by email, or created from the directory if they have none;
+/// a daily job imports everyone active. One per provider.
+model DirectoryConnection {
+  id String @id @default(cuid())
+
+  provider DirectoryProvider @unique
+  /// Entra tenant id, or the Google Workspace customer id.
+  tenantId String
+  /// The organization's verified domains. Only addresses in these are linked
+  /// by email or imported.
+  domains  String[]
+
+  /// Create an employee for someone in the directory who has none — at sign-in
+  /// and at each sync. Off means sign-in only links existing employees.
+  autoProvision Boolean @default(true)
+
+  connectedById String?
+  connectedBy   Employee? @relation(fields: [connectedById], references: [id], onDelete: SetNull)
+
+  lastSyncAt     DateTime? @db.Timestamptz
+  /// What the last sync did, or why it failed.
+  lastSyncDetail Json?
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  @@map("directory_connections")
+}
+
+/// Every request for an emailed sign-in link, known address or not — the
+/// rate limits count these. Only a request for an employee who may sign in
+/// gets a token, and only its hash is stored.
+model SignInLinkRequest {
+  id String @id @default(cuid())
+
+  /// As typed, lower-cased and trimmed.
+  email     String
+  ipAddress String?
+
+  employeeId String?
+  employee   Employee? @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  /// SHA-256 of the token in the link. Null when no link was sent.
+  tokenHash String?   @unique
+  expiresAt DateTime? @db.Timestamptz
+  usedAt    DateTime? @db.Timestamptz
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  @@index([email, createdAt])
+  @@index([ipAddress, createdAt])
+  @@map("sign_in_link_requests")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+//
+// Every notification is a row here first, written in the same transaction as
+// the change it announces — so a rolled-back approval announces nothing — and
+// the row is the in-app list. Push and email are delivered from the row
+// afterwards, and retried by the hourly `send-notifications` job. See
+// lib/notifications/.
+// ---------------------------------------------------------------------------
+
+enum NotificationType {
+  /// A leave request, overtime log or timesheet is waiting on you — when it
+  /// arrives, and as escalating reminders while it waits.
+  APPROVAL_WAITING
+  /// Your request, log or timesheet was approved, denied or sent back.
+  REQUEST_DECIDED
+  /// Your timesheet is due soon.
+  TIMESHEET_DUE
+  /// Your timesheet is past its due date and not submitted.
+  TIMESHEET_OVERDUE
+  /// Administrators: what the year-end rollover did.
+  ROLLOVER_SUMMARY
+}
+
+enum DeliveryStatus {
+  PENDING
+  /// Claimed by a sender. One left here a while is retried.
+  SENDING
+  SENT
+  /// Gave up after repeated failures, or the channel turned out unusable.
+  FAILED
+  /// Email held back because the recipient takes a daily digest instead.
+  DIGEST
+}
+
+model Notification {
+  id String @id @default(cuid())
+
+  recipientId String
+  recipient   Employee @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+
+  type NotificationType
+  /// What makes a re-run of a sweep send nothing twice (rule 3): one
+  /// notification per recipient per key, e.g. `reminder:<step>:daily-2`.
+  key  String
+
+  title String
+  body  String
+  /// Where it leads, a path within the app.
+  url   String
+
+  readAt DateTime? @db.Timestamptz
+
+  /// Null: not wanted on that channel, by the org or the recipient.
+  pushStatus  DeliveryStatus?
+  emailStatus DeliveryStatus?
+  attempts    Int             @default(0)
+  lastError   String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  @@unique([recipientId, key])
+  @@index([recipientId, createdAt])
+  @@index([pushStatus])
+  @@index([emailStatus])
+  @@map("notifications")
+}
+
+/// One employee's channels for one notification type. No row means the
+/// defaults: push on, and email on whenever the org sends email.
+model NotificationPreference {
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  type  NotificationType
+  push  Boolean
+  email Boolean
+
+  updatedAt DateTime @updatedAt @db.Timestamptz
+
+  @@id([employeeId, type])
+  @@map("notification_preferences")
+}
+
+/// A browser that has agreed to receive Web Push for an employee. Removed
+/// when the push service says it is gone.
+model PushSubscription {
+  id String @id @default(cuid())
+
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  endpoint  String  @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+
+  createdAt     DateTime  @default(now()) @db.Timestamptz
+  lastSuccessAt DateTime? @db.Timestamptz
+
+  @@index([employeeId])
+  @@map("push_subscriptions")
+}
+
+/// One approver's digest for one day, in the org's timezone. The unique key
+/// is what stops an hourly job sending it twice.
+model NotificationDigest {
+  id String @id @default(cuid())
+
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  /// DATE (rule 7).
+  date      DateTime @db.Date
+  itemCount Int
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  @@unique([employeeId, date])
+  @@map("notification_digests")
+}
