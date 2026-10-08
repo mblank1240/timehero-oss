@@ -180,6 +180,7 @@ test.describe('configuration editing', () => {
 
     await page.getByLabel('Policy name').fill(`Bad Ceiling ${Date.now()}`)
     await page.getByLabel('Annual allotment (minutes)').fill('7200')
+    await page.getByLabel('Waiting period (days)').fill('0')
     await page.getByLabel('Balance ceiling (minutes)').fill('2400')
     await page.getByRole('button', { name: 'Add policy' }).click()
 
@@ -196,7 +197,12 @@ test.describe('configuration editing', () => {
 
     await panel.getByLabel('Name').fill('Backwards window')
     await panel.getByLabel('From month').selectOption('12')
+    await panel.getByLabel('From day').fill('1')
     await panel.getByLabel('To month').selectOption('3')
+    await panel.getByLabel('To day').fill('1')
+    await panel.getByLabel('Month', { exact: true }).selectOption('4')
+    await panel.getByLabel('Day', { exact: true }).fill('1')
+    await panel.getByLabel('Years later').fill('1')
     await panel.getByRole('button', { name: 'Add window' }).click()
 
     await expect(page.locator('body')).toContainText('ends before it starts')

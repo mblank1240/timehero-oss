@@ -2,6 +2,7 @@ import Link from 'next/link'
 
 import { ACCRUABLE_LABELS, LeaveTypeFields } from '@/components/config-fields'
 import { ConfigForm, SubmitButton } from '@/components/form'
+import { requireAdmin } from '@/lib/authz'
 import { saveLeaveType } from '@/lib/config/actions'
 import { db } from '@/lib/db'
 
@@ -9,6 +10,7 @@ export const metadata = { title: 'Leave types · TimeHero' }
 
 
 export default async function LeaveTypesPage() {
+  await requireAdmin()
   const types = await db.leaveType.findMany({
     orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     include: { _count: { select: { policies: true } } },

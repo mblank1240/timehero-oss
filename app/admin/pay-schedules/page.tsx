@@ -2,6 +2,7 @@ import Link from 'next/link'
 
 import { PAY_SCHEDULE_TYPE_LABELS, PayScheduleFields } from '@/components/config-fields'
 import { ActionButton, ConfigForm, SubmitButton } from '@/components/form'
+import { requireAdmin } from '@/lib/authz'
 import { savePaySchedule, syncPayPeriods } from '@/lib/config/actions'
 import { db } from '@/lib/db'
 import { periodsPerYear } from '@/lib/payperiods/generate'
@@ -14,6 +15,7 @@ function fmt(d: Date): string {
 }
 
 export default async function PaySchedulesPage() {
+  await requireAdmin()
   const schedules = await db.paySchedule.findMany({
     orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
     include: {

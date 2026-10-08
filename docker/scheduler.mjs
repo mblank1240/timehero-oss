@@ -26,15 +26,17 @@ const DAILY = [
   'sync-directory',
 ]
 
-/** The jobs due at this UTC minute. */
+const DAILY_HOUR = 7
+
+/** The batches due at this UTC minute. Each batch runs its jobs in order. */
 function due(now) {
   const minute = now.getUTCMinutes()
   const hour = now.getUTCHours()
-  const jobs = []
-  if (hour === 7 && minute === 0) jobs.push(...DAILY)
-  if (now.getUTCDay() === 0 && hour === 6 && minute === 0) jobs.push('generate-pay-periods')
-  if (minute === 15) jobs.push('send-notifications')
-  return jobs
+  const batches = []
+  if (hour === DAILY_HOUR && minute === 0) batches.push(DAILY)
+  if (now.getUTCDay() === 0 && hour === 6 && minute === 0) batches.push(['generate-pay-periods'])
+  if (minute === 15) batches.push(['send-notifications'])
+  return batches
 }
 
 async function run(job) {
@@ -51,16 +53,41 @@ async function run(job) {
   }
 }
 
+/**
+ * Batches run alongside each other, not one after another: the daily batch
+ * can take minutes, and the hourly notifications must not wait on it (nor
+ * miss their minute because of it). A batch still running when it comes due
+ * again is not started twice.
+ */
+const running = new Set()
+function start(batch) {
+  const name = batch.join(',')
+  if (running.has(name)) return
+  running.add(name)
+  ;(async () => {
+    for (const job of batch) await run(job)
+  })().finally(() => running.delete(name))
+}
+
 let last = ''
-async function tick() {
+function tick() {
   const now = new Date()
   const key = now.toISOString().slice(0, 16)
   if (key !== last) {
     last = key
-    for (const job of due(now)) await run(job)
+    for (const batch of due(now)) start(batch)
   }
   setTimeout(tick, 20_000)
 }
 
 console.log(`Scheduler posting to ${BASE_URL}/api/jobs`)
+
+// A container that was down at the daily hour — restarted, upgraded, the host
+// rebooted — would otherwise skip that day. The jobs are idempotent, so running
+// the batch again after a start later in the day changes nothing if it did run.
+const startedAt = new Date()
+if (startedAt.getUTCHours() * 60 + startedAt.getUTCMinutes() > DAILY_HOUR * 60) {
+  console.log('Started after the daily run time: running the daily jobs now in case they were missed.')
+  start(DAILY)
+}
 tick()

@@ -54,3 +54,8 @@ next-env.d.ts
 
 # employee CSVs for docker compose run tools (scripts/import.ts)
 /import/
+
+# an organization's own configuration (scripts/setup.ts --config); only the
+# fictional example is part of the repository
+/prisma/config/*.json
+!/prisma/config/example.json

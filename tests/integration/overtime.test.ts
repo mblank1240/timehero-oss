@@ -254,6 +254,36 @@ describe('banking overtime', () => {
     }
   })
 
+  /**
+   * Worked ten days ago under a five-day expiry: the comp ran out five days
+   * ago, before anyone approved it. Banking it would grant time the expiry
+   * job forfeits the same night, so approval refuses and leaves the step
+   * pending for the approver to deny.
+   */
+  it('refuses to bank comp that expired before it was approved', async () => {
+    const approver = await person('expired-approver')
+    const worker = await person('expired')
+    await chain(worker.id, [approver])
+
+    const worked = addDays(today, -10)
+    const { id } = await submitOvertimeLog(worker, form('1h', iso(worked)))
+
+    await db.orgSettings.update({ where: { id: 1 }, data: { compExpiresAfterDays: 5 } })
+    try {
+      const error = await refusal(decideOvertimeLog(approver, { logId: id, decision: 'APPROVE' }))
+      expect(error.message).toContain(`expired on ${iso(addDays(worked, 5))}`)
+    } finally {
+      await db.orgSettings.update({ where: { id: 1 }, data: { compExpiresAfterDays: null } })
+    }
+
+    expect(await earned(id)).toEqual([])
+    expect((await log(id)).status).toBe('PENDING')
+    expect((await steps(id)).map((s) => s.status)).toEqual(['PENDING'])
+
+    // Denying it still works.
+    expect(await decideOvertimeLog(approver, { logId: id, decision: 'DENY' })).toBe('DENIED')
+  })
+
   it('is spendable as an ordinary leave request against the comp type', async () => {
     const approver = await person('spend-approver')
     const worker = await person('spend')
@@ -546,23 +576,55 @@ describe('rule 4: an hourly employee cannot reach comp time by any route', () =>
 describe('a log approved after its benefit year has closed', () => {
   const lastYear = () => thisYear.start.getUTCFullYear() - 1
 
+  /**
+   * The window is stretched to the end of this year for the test, so the
+   * carried comp is still spendable on whatever day the suite runs; with the
+   * church's 28 February it would be refused from March on (below).
+   */
   it('banks December overtime on the new year’s first day, with the window’s expiry', async () => {
     const approver = await person('dec-approver')
     const worker = await person('dec')
     await chain(worker.id, [approver])
 
     const { id } = await submitOvertimeLog(worker, form('3h', `${lastYear()}-12-20`))
-    await decideOvertimeLog(approver, { logId: id, decision: 'APPROVE' })
+    await db.carryoverWindow.updateMany({
+      where: { leaveTypeId: compTypeId },
+      data: { usableUntilMonth: 12, usableUntilDay: 31 },
+    })
+    try {
+      await decideOvertimeLog(approver, { logId: id, decision: 'APPROVE' })
+    } finally {
+      await db.carryoverWindow.updateMany({
+        where: { leaveTypeId: compTypeId },
+        data: { usableUntilMonth: 2, usableUntilDay: 28 },
+      })
+    }
 
     expect(await earned(id)).toEqual([
       {
         effectiveDate: thisYear.start,
         minutes: 180,
         kind: 'COMP_EARNED',
-        expiresOn: dayAt(`${thisYear.start.getUTCFullYear()}-02-28`),
+        expiresOn: thisYear.end,
         leaveTypeId: compTypeId,
       },
     ])
+  })
+
+  it('refuses December overtime once the window it would carry under has closed', async (ctx) => {
+    // Only meaningful from March on; in January and February the window is
+    // still open and the comp is banked, as above.
+    if (today <= dayAt(`${thisYear.start.getUTCFullYear()}-02-28`)) ctx.skip()
+
+    const approver = await person('dec-late-approver')
+    const worker = await person('dec-late')
+    await chain(worker.id, [approver])
+
+    const { id } = await submitOvertimeLog(worker, form('3h', `${lastYear()}-12-21`))
+    const error = await refusal(decideOvertimeLog(approver, { logId: id, decision: 'APPROVE' }))
+    expect(error.message).toMatch(/expired on \d{4}-02-28/)
+    expect(await earned(id)).toEqual([])
+    expect((await log(id)).status).toBe('PENDING')
   })
 
   it('banks nothing for November overtime, which the rollover would have forfeited', async () => {

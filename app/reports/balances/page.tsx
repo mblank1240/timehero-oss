@@ -1,5 +1,6 @@
 import { Downloads } from '@/components/report-filters'
 import { todayIn } from '@/lib/accrual/dates'
+import { requireReportsAccess } from '@/lib/authz'
 import { formatDuration } from '@/lib/duration'
 import { orgSettingsOrThrow } from '@/lib/ledger/policies'
 import { balancesReport } from '@/lib/reports/data'
@@ -13,6 +14,7 @@ export const metadata = { title: 'Balances · Reports · TimeHero' }
  * already in the ledger, not accruals still to be written.
  */
 export default async function BalancesReportPage({ searchParams }: PageProps<'/reports/balances'>) {
+  await requireReportsAccess()
   const params = await searchParams
   const org = await orgSettingsOrThrow()
   const today = todayIn(org.timezone)

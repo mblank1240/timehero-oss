@@ -50,6 +50,10 @@ concurrency:
   group: scheduled-jobs
   cancel-in-progress: false
 
+# Only posts to the app; it never reads the repository's contents.
+permissions:
+  contents: read
+
 jobs:
   run:
     runs-on: ubuntu-latest

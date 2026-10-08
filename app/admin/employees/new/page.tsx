@@ -1,10 +1,12 @@
 import { EmployeeForm } from '@/components/employee-form'
+import { requireAdmin } from '@/lib/authz'
 import { db } from '@/lib/db'
 import { createEmployee } from '@/lib/employees/actions'
 
 export const metadata = { title: 'Add employee · TimeHero' }
 
 export default async function NewEmployeePage() {
+  await requireAdmin()
   const [departments, paySchedules] = await Promise.all([
     db.department.findMany({
       orderBy: { name: 'asc' },

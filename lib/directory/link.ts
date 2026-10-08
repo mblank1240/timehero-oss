@@ -9,17 +9,22 @@
  *    Without one, a multi-tenant Microsoft app (`common`/`organizations`)
  *    is refused too: any Microsoft account anywhere could claim any email
  *    address, and linking by it would let a stranger sign in as an employee
- *    (the "nOAuth" class of mistake).
+ *    (the "nOAuth" class of mistake). So is Google: a personal Google
+ *    account can be made on any address, including a work one, and would
+ *    outlive the person's job there. Without a Workspace registered, only a
+ *    Google account bound earlier gets in.
  * 2. **A bound account is its employee.** Matched on the provider's stable
  *    id, so a renamed mailbox still gets in.
  * 3. **Otherwise link by email** — only an address the provider vouches for,
- *    and with a directory registered, only one in its domains.
+ *    and with a directory registered, only one in its domains. Google links
+ *    only with a Workspace registered (rule 1).
  * 4. **Otherwise create the employee** from a registered Microsoft directory,
  *    when it allows that. The service confirms with the directory that the
  *    account exists and is enabled before doing so.
  *
  * Whether the employee may sign in at all (active, not terminated) is
- * checked afterwards, by `resolveEmployeeForSignIn`, as for every route in.
+ * checked afterwards, by `resolveEmployeeForSignIn`, as for every route in —
+ * and `disabledInDirectory`, below.
  */
 
 export type ExternalProvider = 'MICROSOFT' | 'GOOGLE'
@@ -49,6 +54,20 @@ export type LinkDecision =
       reason: 'WRONG_TENANT' | 'UNTRUSTED_TENANT' | 'NOT_LINKED'
     }
 
+/**
+ * True when the directory sync has seen one of the employee's linked accounts
+ * disabled. The sync only flags such an employee for review — leaving is an
+ * HR decision — but nobody signs in by any route meanwhile: a disabled
+ * directory account is usually someone who has left, and an emailed link or a
+ * Google account must not outlast it. Unlinking the account (the employee's
+ * page) lets them back in; a later sync that sees it enabled again does too.
+ */
+export function disabledInDirectory(
+  identities: readonly { directoryAccountEnabled: boolean | null }[],
+): boolean {
+  return identities.some((i) => i.directoryAccountEnabled === false)
+}
+
 export function emailDomain(email: string): string {
   return email.slice(email.lastIndexOf('@') + 1).toLowerCase()
 }
@@ -73,7 +92,10 @@ export function decideExternalSignIn(args: {
         ? signIn.tenant?.toLowerCase() === connection.tenantId.toLowerCase()
         : signIn.tenant !== null && domains.includes(signIn.tenant.toLowerCase())
     if (!ours) return { kind: 'DENY', reason: 'WRONG_TENANT' }
-  } else if (signIn.provider === 'MICROSOFT' && args.issuerIsMultiTenant && !args.boundEmployeeId) {
+  } else if (
+    !args.boundEmployeeId &&
+    (signIn.provider === 'GOOGLE' || args.issuerIsMultiTenant)
+  ) {
     return { kind: 'DENY', reason: 'UNTRUSTED_TENANT' }
   }
 

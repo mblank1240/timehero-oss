@@ -78,3 +78,26 @@ export async function runJob(
     throw error
   }
 }
+
+/**
+ * Fails the run once a job has finished everyone it could.
+ *
+ * The jobs isolate each employee — one person's bad configuration must not
+ * cost everyone else their accrual — and collect what went wrong instead of
+ * stopping at it. Throwing at the end marks the `JobRun` failed and turns the
+ * workflow red while everything that did succeed stays written; a re-run once
+ * the cause is fixed picks up only what is missing, because every write is
+ * idempotent.
+ */
+export function throwIfFailures(what: string, failures: readonly string[]): void {
+  if (failures.length === 0) return
+  throw new Error(
+    `${failures.length} ${what} failed: ${failures.slice(0, 5).join('; ')}` +
+      (failures.length > 5 ? ` (and ${failures.length - 5} more)` : ''),
+  )
+}
+
+/** One failure, for `throwIfFailures`: who it was and what the error said. */
+export function describeFailure(who: string, error: unknown): string {
+  return `${who}: ${error instanceof Error ? error.message : String(error)}`
+}

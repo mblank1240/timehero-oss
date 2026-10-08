@@ -76,6 +76,8 @@ At the benefit-year boundary, per employee and type:
 4. Write a `ROLLOVER_IN` for the carried amount, same date, with an expiry date where one applies.
 5. For `ANNUAL_LUMP` policies, the new year's grant.
 
+The rollover job runs daily and does this on the benefit year's first day — or, if that day's run was missed, on the first run after it. The figures are the same whichever day it runs: the closing balance is read as of the old year's last day and every entry is dated the new year's first day. Before reading the closing balance it settles the old year's last pay period if that period's accrual was never written, since within a year a missed pay day is caught up by the next one but the year's last has no next one. A missed rollover from an earlier year than the current one is recovered by running the job for that year's first day.
+
 Steps 3 and 4 look redundant but aren't: a balance is a cumulative sum over all time, so it carries forward by itself. Rollover zeroes the type and re-grants what's kept. Doing only step 4 would double everyone's balance. The pair also makes the ledger legible — "you had 200, 160 forfeited, 40 carried" — instead of a bare net adjustment.
 
 ### Carryover windows
@@ -107,7 +109,7 @@ An employee may withdraw a log while it is pending. Approved overtime is not can
 
 A log can be submitted for any day back to the start of the previous benefit year. One approved after the year it was worked in has closed banks only what that year's rollover would have kept: December overtime approved in January arrives with the December window's February expiry; November overtime approved in January banks nothing, exactly as if it had been approved on time and forfeited on 1 January. The log's page shows the approver what approval will bank before they decide.
 
-Comp may optionally expire a set number of days after it was worked (`compExpiresAfterDays`, unset at the church); the daily expiry job forfeits what is left.
+Comp may optionally expire a set number of days after it was worked (`compExpiresAfterDays`, unset at the church); the daily expiry job forfeits what is left. A log whose comp would already have expired by the day it is finally approved — worked on 1 March under a 30-day expiry and approved on 15 April, or December overtime approved after the window's February date — cannot be approved: it would be banked and forfeited the same night, never spendable. The approver sees why on the log's page and denies it; if the time is still owed, an administrator posts it as a ledger adjustment.
 
 Comp time's rollover behavior is a `RolloverRule` plus any `CarryoverWindow` rows, exactly like every other leave type. Ours is a cap of **none** with a single window covering December — see Rollover above. Employees see the February expiry date on their dashboard while a carried comp balance exists, so "use it or lose it" is visible rather than a surprise.
 
@@ -123,7 +125,9 @@ Flow: request submitted → step 1 notified → approves → step 2 notified →
 - An approver appearing in their own chain is skipped automatically.
 - Empty chain → routes to all admins; any one of them can approve.
 
-Balance is checked at submission and re-checked at final approval. Insufficient balance blocks submission unless the type allows negative balances.
+Balance is checked at submission and re-checked at final approval. Insufficient balance blocks submission unless the type allows negative balances. The check looks at every date from the request's first day onward, not only the days requested: time can leave the account after the day it is spent from. A request for 30 March against comp expiring 31 March, still pending when the expiry job forfeits that comp on 1 April, would otherwise be approved on 2 April and spend the same time twice — so it is refused, and the approver denies it or has the balance corrected.
+
+Final approval is also refused for a request with any day in a benefit year that has closed since it was submitted — a December request still pending in January. That year's rollover has already forfeited and carried the balance without it; writing the usage now would take it out of the new year instead. The approver denies it, and an administrator corrects the closed year with a ledger adjustment.
 
 ## Employee views
 

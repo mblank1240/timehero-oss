@@ -1,11 +1,13 @@
 import Link from 'next/link'
 
+import { requireAdmin } from '@/lib/authz'
 import { db } from '@/lib/db'
 import { ROLE_LABEL } from '@/lib/employees/schema'
 
 export const metadata = { title: 'Employees · TimeHero' }
 
 export default async function EmployeesPage() {
+  await requireAdmin()
   const employees = await db.employee.findMany({
     orderBy: [{ isActive: 'desc' }, { lastName: 'asc' }, { firstName: 'asc' }],
     select: {

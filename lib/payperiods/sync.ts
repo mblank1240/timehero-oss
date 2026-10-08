@@ -38,6 +38,11 @@ export function startOfUtcDay(date: Date): Date {
 /**
  * Syncs one schedule, `GENERATE_MONTHS_AHEAD` months out from `asOf`.
  *
+ * Every period up to the horizon is written one row at a time in a single
+ * transaction, so `asOf` must be a sane date: the scheduled job's comes
+ * through `jobDate`, which refuses anything past tomorrow
+ * (`JOB_DATE_MAX_DAYS_AHEAD`), and the admin screen's is now.
+ *
  * Locked periods, periods with timesheets and periods already past are left
  * alone — history must not move when someone edits a schedule, and a
  * timesheet cannot have its period's boundaries redrawn underneath it.
@@ -111,9 +116,12 @@ export async function syncPayPeriodsFor(
     }
 
     // Anything left over no longer belongs to the schedule's shape. Only
-    // future periods that nothing has been entered against may be removed.
+    // future periods that nothing has been entered against may be removed —
+    // and only within this run's horizon. A period past `through` is not a
+    // misfit, just further out than a run for an earlier date looks; a
+    // backfill must not delete what the last ordinary run generated.
     const orphanIds = [...byStart.values()]
-      .filter((p) => !fixed(p) && p.startDate > today)
+      .filter((p) => !fixed(p) && p.startDate > today && p.startDate <= through)
       .map((p) => p.id)
 
     if (orphanIds.length > 0) {

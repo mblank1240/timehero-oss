@@ -22,5 +22,10 @@ upgrade to it to receive fixes.
 - `DEV_AUTH_BYPASS` must never be set in production; the app refuses to start
   if it is.
 - Keep `AUTH_SECRET` and `JOBS_SECRET` secret, and rotate them if they leak
-  (`docs/RUNBOOK.md`).
-- Serve TimeHero only over HTTPS.
+  (`docs/RUNBOOK.md`). In production each must be at least 32 characters, and
+  `APP_URL` must be set; the app refuses to start otherwise.
+- `MAIL_TRANSPORT=file` and `console` keep message bodies, sign-in links
+  included, on the server. Production refuses both.
+- Serve TimeHero only over HTTPS. Every response carries
+  `Strict-Transport-Security` and a frame-blocking Content-Security-Policy
+  (`next.config.ts`).

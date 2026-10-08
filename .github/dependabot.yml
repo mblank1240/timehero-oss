@@ -1,0 +1,18 @@
+# Keeps the pinned action SHAs and the npm dependencies current. Each update
+# is a pull request, so CI runs on it before anything reaches main.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # Minor and patch releases together in one pull request; a major
+      # version gets its own.
+      minor-and-patch:
+        update-types: [minor, patch]

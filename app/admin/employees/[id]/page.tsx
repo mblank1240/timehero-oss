@@ -24,8 +24,8 @@ function toDateInput(d: Date | null): string {
 }
 
 export default async function EditEmployeePage({ params }: PageProps<'/admin/employees/[id]'>) {
-  const { id } = await params
   const admin = await requireAdmin()
+  const { id } = await params
 
   const [employee, departments, paySchedules, policies, candidates] = await Promise.all([
     db.employee.findUnique({

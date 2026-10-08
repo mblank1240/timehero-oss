@@ -41,6 +41,14 @@ export async function createAdjustment(
 
     const { employeeId, leaveTypeId, effectiveDate, minutes, reason } = parsed.data
 
+    // Nobody corrects their own balance; another administrator posts it, so
+    // every adjustment has a second person behind it.
+    if (employeeId === actor.id) {
+      return fail('You cannot adjust your own balance.', {
+        employeeId: ['Another administrator must post this adjustment.'],
+      })
+    }
+
     const [employee, leaveType] = await Promise.all([
       db.employee.findUnique({
         where: { id: employeeId },

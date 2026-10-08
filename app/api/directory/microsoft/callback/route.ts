@@ -49,9 +49,6 @@ export async function GET(request: NextRequest) {
   if (!tenant || q.get('admin_consent')?.toLowerCase() !== 'true') {
     return back({ error: 'Microsoft did not grant consent.' })
   }
-  const mismatch = tenantMismatch(tenant)
-  if (mismatch) return back({ error: mismatch })
-
   let domains: string[]
   try {
     // Succeeds only with consent in that tenant: this is the proof.
@@ -62,6 +59,9 @@ export async function GET(request: NextRequest) {
     })
   }
   if (domains.length === 0) return back({ error: 'That tenant has no verified domains.' })
+  // After the read: an issuer named by domain can only be matched against them.
+  const mismatch = tenantMismatch(tenant, { domains })
+  if (mismatch) return back({ error: mismatch })
 
   const before = await db.directoryConnection.findUnique({
     where: { provider: 'MICROSOFT' },

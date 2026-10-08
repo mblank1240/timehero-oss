@@ -68,7 +68,7 @@ function benefitYearStart(org: Org) {
 }
 
 /** The furthest ahead a request may reach: as far as the pay calendar is generated. */
-function latestRequestableDate(today: Date): Date {
+export function latestRequestableDate(today: Date): Date {
   return new Date(
     Date.UTC(
       today.getUTCFullYear(),
@@ -140,11 +140,17 @@ export type OnBehalf = {
  * also steers round. An adjustment, dated today and with a reason, is the
  * way to correct a closed year.
  */
-function refuseClosedYear(dates: readonly Date[], yearStart: Date) {
+function refuseClosedYear(
+  dates: readonly Date[],
+  yearStart: Date,
+  when: 'book' | 'approve' = 'book',
+) {
   const early = dates.filter((d) => d < yearStart)
   if (early.length > 0) {
     throw new RequestError(
-      `${iso(early[0])} is in a benefit year that has already closed, so it cannot be booked as leave. Correct that year with a ledger adjustment instead.`,
+      when === 'book'
+        ? `${iso(early[0])} is in a benefit year that has already closed, so it cannot be booked as leave. Correct that year with a ledger adjustment instead.`
+        : `${iso(early[0])} is in a benefit year that has already closed, so this request can no longer be approved. Deny it, and have an administrator correct that year with a ledger adjustment instead.`,
     )
   }
 }
@@ -425,9 +431,11 @@ export type DecideResult = 'ADVANCED' | 'APPROVED' | 'DENIED'
  *
  * On the last approval the balance is checked again — the spec's second
  * check, because a month can pass between submission and the last signature
- * and the time may have been spent elsewhere. If it no longer covers the
- * request, nothing is written: the step stays pending, and the approver is
- * told to deny it or have the balance corrected.
+ * and the time may have been spent elsewhere, or expired. If it no longer
+ * covers the request, nothing is written: the step stays pending, and the
+ * approver is told to deny it or have the balance corrected. The same goes for
+ * a request whose days fall in a benefit year that has closed since it was
+ * submitted.
  */
 export async function decideLeaveRequest(actor: Actor, args: DecideArgs): Promise<DecideResult> {
   const org = await orgSettingsOrThrow()
@@ -487,11 +495,23 @@ export async function decideLeaveRequest(actor: Actor, args: DecideArgs): Promis
     }
 
     if (outcome.result === 'APPROVED') {
+      const today = todayIn(org.timezone)
+
+      // A request submitted in December and approved in January: the year it
+      // was for has rolled over without it, so writing its USAGE now would
+      // take the time out of the new year's balance instead. Throwing rolls
+      // back the step update above.
+      refuseClosedYear(
+        request.days.map((d) => d.date),
+        benefitYearContaining(today, org.benefitYearStartMonth, org.benefitYearStartDay).start,
+        'approve',
+      )
+
       const ctx = await loadLeaveContext(
         {
           employeeId: request.employeeId,
           leaveTypeId: request.leaveTypeId,
-          today: todayIn(org.timezone),
+          today,
           benefitYearStart: benefitYearStart(org),
           excludeRequestId: request.id,
         },

@@ -1,5 +1,6 @@
 import type { NextRequest } from 'next/server'
 
+import { db } from '@/lib/db'
 import { isJobName, jobByName, JOB_NAMES } from '@/lib/jobs/catalog'
 import { authorizeJobRequest, jobDate } from '@/lib/jobs/request'
 import { runJob } from '@/lib/jobs/runner'
@@ -37,9 +38,13 @@ export async function POST(request: NextRequest, ctx: RouteContext<'/api/jobs/[j
     )
   }
 
+  // "Today" is the organization's, not the server's. Before setup there are no
+  // settings; the job then fails inside runJob, which records why.
+  const org = await db.orgSettings.findUnique({ where: { id: 1 }, select: { timezone: true } })
+
   let asOf: Date
   try {
-    asOf = jobDate(request.nextUrl.searchParams.get('date'))
+    asOf = jobDate(request.nextUrl.searchParams.get('date'), { timeZone: org?.timezone })
   } catch (error) {
     return Response.json(
       { ok: false, error: error instanceof Error ? error.message : 'Invalid date.' },

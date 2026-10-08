@@ -60,6 +60,11 @@ export type CompPlanArgs = {
   windows: readonly CarryoverWindowInput[]
   /** Every ledger entry for this employee and the comp type. */
   entries: readonly ExistingEntry[]
+  /**
+   * The approval date — today. When given, a plan that would bank time
+   * already past its expiry says so in `expiredOn`.
+   */
+  today?: Date
 }
 
 export type CompPlan = {
@@ -73,6 +78,14 @@ export type CompPlan = {
    * it before deciding and the employee sees it afterwards.
    */
   explanation: string | null
+  /**
+   * The earliest expiry among `entries` that is already behind `today`, or
+   * null. Comp worked on 1 March under a 30-day expiry and approved on
+   * 15 April would be banked dead: granted, then forfeited by the next
+   * night's expiry job, with nothing ever spendable. Approval refuses a plan
+   * like that rather than writing it (`decideOvertimeLog`).
+   */
+  expiredOn: Date | null
 }
 
 export const OVERTIME_SOURCE = 'OvertimeLog'
@@ -80,6 +93,25 @@ export const OVERTIME_SOURCE = 'OvertimeLog'
 const iso = (date: Date) => date.toISOString().slice(0, 10)
 
 export function planCompEarned(args: CompPlanArgs): CompPlan {
+  const plan = planEntries(args)
+  if (!args.today) return plan
+
+  // A lot is spendable on its expiry date and gone the day after.
+  const today = toUtcDay(args.today)
+  const dead = plan.entries
+    .map((e) => e.expiresOn)
+    .filter((d): d is Date => d !== null && toUtcDay(d) < today)
+    .sort((a, b) => toUtcDay(a) - toUtcDay(b))[0]
+  if (!dead) return plan
+
+  return {
+    ...plan,
+    expiredOn: dead,
+    explanation: `This time would have expired on ${iso(dead)}, before it could be approved, so approving it now would bank nothing anyone could spend. Deny it; if the time is still owed, an administrator can post it as a ledger adjustment.`,
+  }
+}
+
+function planEntries(args: CompPlanArgs): CompPlan {
   const { log, currentYear, previousYear } = args
   const gross = compMinutes(log.minutes, args.multiplierBps)
   const ownExpiry =
@@ -94,7 +126,7 @@ export function planCompEarned(args: CompPlanArgs): CompPlan {
   }
 
   if (gross <= 0) {
-    return { grossMinutes: 0, earnedMinutes: 0, entries: [], explanation: null }
+    return { grossMinutes: 0, earnedMinutes: 0, entries: [], explanation: null, expiredOn: null }
   }
 
   const day = toUtcDay(log.date)
@@ -117,6 +149,7 @@ export function planCompEarned(args: CompPlanArgs): CompPlan {
         },
       ],
       explanation: null,
+      expiredOn: null,
     }
   }
 
@@ -127,6 +160,7 @@ export function planCompEarned(args: CompPlanArgs): CompPlan {
       earnedMinutes: 0,
       entries: [],
       explanation: `Worked before the ${previousYear.label} benefit year, so two rollovers have passed and none of it would have carried.`,
+      expiredOn: null,
     }
   }
 
@@ -171,6 +205,7 @@ export function planCompEarned(args: CompPlanArgs): CompPlan {
       earned < gross
         ? `Worked in the ${previousYear.label} benefit year, which has closed. Its rollover would have kept ${earned} of the ${gross} minutes, so that is what is banked.`
         : null,
+    expiredOn: null,
   }
 }
 

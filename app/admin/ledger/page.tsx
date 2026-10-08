@@ -1,6 +1,7 @@
 import Link from 'next/link'
 
 import { ConfigForm, Field, SubmitButton } from '@/components/form'
+import { requireAdmin } from '@/lib/authz'
 import { balancesAsOf } from '@/lib/ledger/balance'
 import { createAdjustment } from '@/lib/ledger/actions'
 import { accruableBy } from '@/lib/ledger/policies'
@@ -19,6 +20,7 @@ export const metadata = { title: 'Ledger · TimeHero' }
  * "why is my PTO wrong?" without opening a database client.
  */
 export default async function LedgerPage({ searchParams }: PageProps<'/admin/ledger'>) {
+  await requireAdmin()
   const params = await searchParams
   const selectedId = typeof params.employee === 'string' ? params.employee : undefined
 

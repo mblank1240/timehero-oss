@@ -14,6 +14,16 @@
  *
  * Both are idempotent on their period key, so a retry, a manual trigger during
  * a scheduled run, or a backfill for a past date grants nothing twice.
+ *
+ * A run missed on a pay day costs nothing within the year — the next period's
+ * cumulative target catches it up. The year's last period is the exception,
+ * and the rollover job settles it before it reads the closing balance (see
+ * `lib/jobs/rollover.ts`), so this job never writes into a year that has
+ * already been closed.
+ *
+ * Each employee is written separately and a failure is collected rather than
+ * thrown, so one person's bad configuration cannot cost everyone else their
+ * accrual; the run is failed at the end if anyone was left out.
  */
 
 import { benefitYearContaining } from '@/lib/accrual/dates'
@@ -25,7 +35,7 @@ import { entriesByLeaveType, writeEntries } from '@/lib/ledger/entries'
 import { orgSettingsOrThrow, subjectsForAccrual } from '@/lib/ledger/policies'
 import type { PayScheduleInput } from '@/lib/payperiods/generate'
 
-import type { JobOutcome, JobRunContext } from './runner'
+import { describeFailure, throwIfFailures, type JobOutcome, type JobRunContext } from './runner'
 
 export async function runAccrual(asOf: Date, run: JobRunContext): Promise<JobOutcome> {
   const org = await orgSettingsOrThrow()
@@ -44,73 +54,90 @@ export async function runAccrual(asOf: Date, run: JobRunContext): Promise<JobOut
     },
   })
 
-  const proposed: ProposedEntry[] = []
+  let entriesCreated = 0
   let lumpGrants = 0
   let periodAccruals = 0
   const unscheduled = new Set<string>()
+  const failures: string[] = []
 
   for (const subject of subjects) {
     const { employee, policies } = subject
     if (policies.length === 0) continue
 
-    const ledger = await entriesByLeaveType(employee.id)
+    try {
+      const proposed: ProposedEntry[] = []
+      let lumps = 0
+      let accruals = 0
 
-    for (const { policy } of policies) {
-      const entries = ledger.get(policy.leaveTypeId) ?? []
+      const ledger = await entriesByLeaveType(employee.id)
 
-      if (policy.method === 'ANNUAL_LUMP') {
-        const year = benefitYearContaining(asOf, org.benefitYearStartMonth, org.benefitYearStartDay)
-        const grant = grantLump(employee, policy, year)
-        // Only once it is actually due. A future-dated grant written by the
-        // rollover job is fine — a balance ignores entries dated ahead — but
-        // this job has no reason to write one early.
-        if (grant && grant.effectiveDate <= asOf) {
-          proposed.push(grant)
-          lumpGrants += 1
-        }
-        continue
-      }
+      for (const { policy } of policies) {
+        const entries = ledger.get(policy.leaveTypeId) ?? []
 
-      // A per-pay-period policy needs a pay schedule to divide the year by.
-      // Without one nothing would ever accrue, silently, so it is counted and
-      // reported rather than skipped quietly.
-      if (!subject.payScheduleId) {
-        unscheduled.add(employee.id)
-        continue
-      }
-
-      for (const period of closingPeriods) {
-        if (period.payScheduleId !== subject.payScheduleId) continue
-
-        const schedule: PayScheduleInput = {
-          type: period.paySchedule.type,
-          anchorDate: period.paySchedule.anchorDate,
-          payDateOffsetDays: period.paySchedule.payDateOffsetDays,
-        }
-
-        const accrual = accruePayPeriod({
-          employee,
-          policy,
-          // A period belongs to the benefit year containing its end date.
-          benefitYear: benefitYearContaining(
-            period.endDate,
+        if (policy.method === 'ANNUAL_LUMP') {
+          const year = benefitYearContaining(
+            asOf,
             org.benefitYearStartMonth,
             org.benefitYearStartDay,
-          ),
-          schedule,
-          period: { startDate: period.startDate, endDate: period.endDate },
-          entries,
-        })
+          )
+          const grant = grantLump(employee, policy, year)
+          // Only once it is actually due. A future-dated grant written by the
+          // rollover job is fine — a balance ignores entries dated ahead — but
+          // this job has no reason to write one early.
+          if (grant && grant.effectiveDate <= asOf) {
+            proposed.push(grant)
+            lumps += 1
+          }
+          continue
+        }
 
-        if (accrual) {
-          proposed.push(accrual)
-          periodAccruals += 1
+        // A per-pay-period policy needs a pay schedule to divide the year by.
+        // Without one nothing would ever accrue, silently, so it is counted and
+        // reported rather than skipped quietly.
+        if (!subject.payScheduleId) {
+          unscheduled.add(employee.id)
+          continue
+        }
+
+        for (const period of closingPeriods) {
+          if (period.payScheduleId !== subject.payScheduleId) continue
+
+          const schedule: PayScheduleInput = {
+            type: period.paySchedule.type,
+            anchorDate: period.paySchedule.anchorDate,
+            payDateOffsetDays: period.paySchedule.payDateOffsetDays,
+          }
+
+          const accrual = accruePayPeriod({
+            employee,
+            policy,
+            // A period belongs to the benefit year containing its end date.
+            benefitYear: benefitYearContaining(
+              period.endDate,
+              org.benefitYearStartMonth,
+              org.benefitYearStartDay,
+            ),
+            schedule,
+            period: { startDate: period.startDate, endDate: period.endDate },
+            entries,
+          })
+
+          if (accrual) {
+            proposed.push(accrual)
+            accruals += 1
+          }
         }
       }
+
+      entriesCreated += await writeEntries(proposed, { jobRunId: run.jobRunId })
+      lumpGrants += lumps
+      periodAccruals += accruals
+    } catch (error) {
+      failures.push(describeFailure(employee.id, error))
     }
   }
 
-  const entriesCreated = await writeEntries(proposed, { jobRunId: run.jobRunId })
+  throwIfFailures('employee accrual(s)', failures)
 
   return {
     entriesCreated,

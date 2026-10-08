@@ -5,6 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { writeAudit } from '@/lib/audit'
 import { ForbiddenError, requireAdminOrThrow } from '@/lib/authz'
 import type { ActionResult } from '@/lib/employees/actions'
+import { orgSettingsOrThrow } from '@/lib/ledger/policies'
 
 import { isJobName, jobByName, type JobName } from './catalog'
 import { jobDate } from './request'
@@ -36,9 +37,13 @@ export async function runJobNow(
     if (!isJobName(jobName)) return { ok: false, error: `Unknown job "${jobName}".` }
 
     // An explicit date lets an administrator backfill a day the scheduler
-    // missed, which every job is written to tolerate.
+    // missed, which every job is written to tolerate. Without one it is today
+    // where the organization is, not where the server is.
     const requested = formData?.get('date')
-    const asOf = jobDate(typeof requested === 'string' && requested ? requested : null)
+    const org = await orgSettingsOrThrow()
+    const asOf = jobDate(typeof requested === 'string' && requested ? requested : null, {
+      timeZone: org.timezone,
+    })
 
     const result = await runJob({ jobName, periodKey: asOf.toISOString().slice(0, 10) }, (run) =>
       jobByName(jobName)(asOf, run),

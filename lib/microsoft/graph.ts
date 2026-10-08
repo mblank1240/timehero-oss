@@ -13,6 +13,9 @@ import { env } from '@/lib/env'
 
 const GRAPH = 'https://graph.microsoft.com/v1.0'
 
+/** How long one call to Microsoft may take before it is abandoned. */
+const TIMEOUT_MS = 30_000
+
 export class GraphError extends Error {
   constructor(
     message: string,
@@ -38,6 +41,7 @@ export async function appToken(tenantId: string): Promise<string> {
     `https://login.microsoftonline.com/${encodeURIComponent(tenantId)}/oauth2/v2.0/token`,
     {
       method: 'POST',
+      signal: AbortSignal.timeout(TIMEOUT_MS),
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         client_id: env.AUTH_MICROSOFT_ENTRA_ID_ID,
@@ -72,6 +76,7 @@ async function graph<T>(tenantId: string, path: string, init: RequestInit = {}):
 
   const response = await fetch(url, {
     ...init,
+    signal: init.signal ?? AbortSignal.timeout(TIMEOUT_MS),
     headers: {
       Authorization: `Bearer ${await appToken(tenantId)}`,
       'Content-Type': 'application/json',

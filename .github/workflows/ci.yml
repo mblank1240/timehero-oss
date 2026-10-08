@@ -9,6 +9,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Checks out and tests; writes nothing back to the repository.
+permissions:
+  contents: read
+
 env:
   DATABASE_URL: postgresql://postgres:postgres@localhost:5432/timehero_test
   AUTH_SECRET: ci-only-secret-not-used-for-anything-real
@@ -34,9 +38,9 @@ jobs:
           --health-retries 5
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: 22
           cache: npm
@@ -67,7 +71,7 @@ jobs:
       - name: End-to-end tests
         run: npm run test:e2e
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: playwright-report
@@ -82,7 +86,7 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Environment
         run: |
@@ -92,7 +96,7 @@ jobs:
           APP_URL=http://localhost:3000
           AUTH_URL=http://localhost:3000
           AUTH_SECRET=ci-only-secret-not-used-for-anything-real
-          JOBS_SECRET=ci-only-jobs-secret
+          JOBS_SECRET=ci-only-jobs-secret-not-used-for-anything
           AUTH_EMAIL_LINKS=true
           MAIL_TRANSPORT=smtp
           SMTP_URL=smtp://localhost:2525
@@ -122,7 +126,7 @@ jobs:
         run: |
           set -euo pipefail
           curl -fsS -o /dev/null -w "sign-in page: %{http_code}\n" http://localhost:3000/signin
-          curl -fsS -X POST -H "Authorization: Bearer ci-only-jobs-secret" \
+          curl -fsS -X POST -H "Authorization: Bearer ci-only-jobs-secret-not-used-for-anything" \
             "http://localhost:3000/api/jobs/generate-pay-periods"
           echo
           docker compose logs jobs | grep -q "Scheduler posting to"

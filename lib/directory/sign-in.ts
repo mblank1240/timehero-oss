@@ -7,13 +7,18 @@ import { db } from '@/lib/db'
 import { MULTI_TENANT_ISSUERS, entraIssuerTenant } from '@/lib/env'
 import { resolveEmployeeForSignIn } from '@/lib/sign-in'
 
-import { decideExternalSignIn, type ExternalSignIn } from './link'
+import { decideExternalSignIn, disabledInDirectory, type ExternalSignIn } from './link'
 import type { Directory } from './sources'
 import { provisionFromDirectory } from './sync'
 
 /** The codes the sign-in page explains. */
 export type SignInRefusal =
-  'WrongTenant' | 'UntrustedTenant' | 'NotLinked' | 'Inactive' | 'DirectoryUnavailable'
+  | 'WrongTenant'
+  | 'UntrustedTenant'
+  | 'NotLinked'
+  | 'Inactive'
+  | 'DirectoryDisabled'
+  | 'DirectoryUnavailable'
 
 export async function resolveExternalSignIn(
   signIn: ExternalSignIn,
@@ -107,8 +112,13 @@ export async function resolveExternalSignIn(
 
   const employee = await db.employee.findUniqueOrThrow({
     where: { id: employeeId },
-    select: { isActive: true, terminationDate: true },
+    select: {
+      isActive: true,
+      terminationDate: true,
+      identities: { select: { directoryAccountEnabled: true } },
+    },
   })
   if (!resolveEmployeeForSignIn(employee, now).ok) return { ok: false, refusal: 'Inactive' }
+  if (disabledInDirectory(employee.identities)) return { ok: false, refusal: 'DirectoryDisabled' }
   return { ok: true, employeeId }
 }

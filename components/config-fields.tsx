@@ -196,7 +196,7 @@ export function LeavePolicyFields({
           type="number"
           min={0}
           required
-          defaultValue={defaults?.annualMinutes ?? 7200}
+          defaultValue={defaults?.annualMinutes}
           className="th-input"
         />
       </Field>
@@ -229,7 +229,7 @@ export function LeavePolicyFields({
             min={0}
             max={730}
             required
-            defaultValue={defaults?.waitingPeriodDays ?? 120}
+            defaultValue={defaults?.waitingPeriodDays}
             className="th-input"
           />
         </Field>
@@ -330,7 +330,7 @@ export function PayScheduleFields({
           min={0}
           max={60}
           required
-          defaultValue={defaults?.payDateOffsetDays ?? 5}
+          defaultValue={defaults?.payDateOffsetDays}
           className="th-input"
         />
       </Field>
@@ -365,8 +365,11 @@ export function CarryoverWindowFields({
     isActive: boolean
   }
 }) {
-  const monthSelect = (id: string, value: number) => (
-    <select id={id} name={id} defaultValue={value} className="th-input">
+  const monthSelect = (id: string, value?: number) => (
+    <select id={id} name={id} defaultValue={value ?? ''} required className="th-input">
+      <option value="" disabled>
+        Month…
+      </option>
       {MONTHS.map((m, i) => (
         <option key={m} value={i + 1}>
           {m}
@@ -374,7 +377,7 @@ export function CarryoverWindowFields({
       ))}
     </select>
   )
-  const dayInput = (id: string, value: number, max = 31) => (
+  const dayInput = (id: string, value?: number, max = 31) => (
     <input
       id={id}
       name={id}
@@ -407,16 +410,16 @@ export function CarryoverWindowFields({
           Earned between
         </legend>
         <Field label="From month" name="earnedFromMonth">
-          {monthSelect('earnedFromMonth', defaults?.earnedFromMonth ?? 12)}
+          {monthSelect('earnedFromMonth', defaults?.earnedFromMonth)}
         </Field>
         <Field label="From day" name="earnedFromDay">
-          {dayInput('earnedFromDay', defaults?.earnedFromDay ?? 1)}
+          {dayInput('earnedFromDay', defaults?.earnedFromDay)}
         </Field>
         <Field label="To month" name="earnedToMonth">
-          {monthSelect('earnedToMonth', defaults?.earnedToMonth ?? 12)}
+          {monthSelect('earnedToMonth', defaults?.earnedToMonth)}
         </Field>
         <Field label="To day" name="earnedToDay">
-          {dayInput('earnedToDay', defaults?.earnedToDay ?? 31)}
+          {dayInput('earnedToDay', defaults?.earnedToDay)}
         </Field>
       </fieldset>
 
@@ -425,13 +428,13 @@ export function CarryoverWindowFields({
           Usable until
         </legend>
         <Field label="Month" name="usableUntilMonth">
-          {monthSelect('usableUntilMonth', defaults?.usableUntilMonth ?? 2)}
+          {monthSelect('usableUntilMonth', defaults?.usableUntilMonth)}
         </Field>
         <Field label="Day" name="usableUntilDay">
-          {dayInput('usableUntilDay', defaults?.usableUntilDay ?? 28)}
+          {dayInput('usableUntilDay', defaults?.usableUntilDay)}
         </Field>
         <Field label="Years later" name="usableUntilYearOffset">
-          {dayInput('usableUntilYearOffset', defaults?.usableUntilYearOffset ?? 1, 5)}
+          {dayInput('usableUntilYearOffset', defaults?.usableUntilYearOffset, 5)}
         </Field>
       </fieldset>
 
