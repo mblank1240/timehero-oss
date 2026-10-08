@@ -65,7 +65,11 @@ export const envSchema = z
      * The address it is sent from is an administrator's setting, not
      * configuration — see lib/mail.
      */
-    MAIL_TRANSPORT: z.enum(['smtp', 'graph', 'file', 'console']).optional(),
+    // Blank, as .env.example ships it, means unset.
+    MAIL_TRANSPORT: z.preprocess(
+      (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+      z.enum(['smtp', 'graph', 'file', 'console']).optional(),
+    ),
     SMTP_URL: optionalText,
     MAIL_FILE_DIR: z.string().default('.mail-outbox'),
 

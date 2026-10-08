@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+
+import { parse } from 'dotenv'
 import { describe, expect, it } from 'vitest'
 
 import { MIN_SECRET_LENGTH, envSchema } from '@/lib/env'
@@ -53,5 +56,13 @@ describe('environment secrets', () => {
     expect(issuesFor({ ...production, NODE_ENV: 'development', MAIL_TRANSPORT: 'file' })).toEqual(
       [],
     )
+  })
+
+  it('accepts .env.example as the README has you fill it in', () => {
+    // `cp .env.example .env`, set AUTH_SECRET and DEV_AUTH_BYPASS, `npm run dev`.
+    const example = parse(readFileSync('.env.example', 'utf8'))
+    expect(
+      issuesFor({ ...example, NODE_ENV: 'development', AUTH_SECRET: long, DEV_AUTH_BYPASS: 'true' }),
+    ).toEqual([])
   })
 })
