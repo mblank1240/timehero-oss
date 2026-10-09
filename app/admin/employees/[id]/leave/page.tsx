@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 
 import { LeaveRequestForm } from '@/components/leave-request-form'
-import { requireAdmin } from '@/lib/authz'
+import { requirePermission } from '@/lib/authz'
 import { db } from '@/lib/db'
 import { leaveFormProps } from '@/lib/requests/form-props'
 
@@ -14,7 +14,7 @@ export const metadata = { title: 'Record leave · TimeHero' }
  * or is recorded as already approved.
  */
 export default async function RecordLeavePage({ params }: PageProps<'/admin/employees/[id]/leave'>) {
-  const admin = await requireAdmin()
+  const admin = await requirePermission('MANAGE_TIME_RECORDS')
   const { id } = await params
 
   const employee = await db.employee.findUnique({

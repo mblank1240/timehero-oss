@@ -5,7 +5,7 @@ import { headers } from 'next/headers'
 import { z } from 'zod'
 
 import { diff, writeAudit } from '@/lib/audit'
-import { ForbiddenError, getCurrentUser, requireAdminOrThrow } from '@/lib/authz'
+import { ForbiddenError, getCurrentUser, requirePermissionOrThrow } from '@/lib/authz'
 import { db } from '@/lib/db'
 import type { ActionResult } from '@/lib/employees/actions'
 
@@ -40,7 +40,7 @@ export async function updateNotificationSettings(
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_SETTINGS')
 
     const parsed = notificationSettingsInput.safeParse(Object.fromEntries(formData))
     if (!parsed.success) {

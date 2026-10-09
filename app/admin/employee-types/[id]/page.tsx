@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 
 import { EmployeeTypeFields } from '@/components/config-fields'
 import { ConfigForm, SubmitButton } from '@/components/form'
-import { requireAdmin } from '@/lib/authz'
+import { requirePermission } from '@/lib/authz'
 import { db } from '@/lib/db'
 import { saveEmployeeType } from '@/lib/employee-types/actions'
 
@@ -12,7 +12,7 @@ export const metadata = { title: 'Edit employee type · TimeHero' }
 export default async function EditEmployeeTypePage({
   params,
 }: PageProps<'/admin/employee-types/[id]'>) {
-  await requireAdmin()
+  await requirePermission('MANAGE_EMPLOYEES')
   const { id } = await params
   const type = await db.employeeType.findUnique({
     where: { id },

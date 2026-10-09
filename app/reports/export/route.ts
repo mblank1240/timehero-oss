@@ -1,10 +1,11 @@
 import type { NextRequest } from 'next/server'
 
 import { todayIn } from '@/lib/accrual/dates'
-import { ForbiddenError, requireReportsAccessOrThrow } from '@/lib/authz'
+import { ForbiddenError, getCurrentUser } from '@/lib/authz'
 import { toCsv } from '@/lib/csv'
 import { db } from '@/lib/db'
 import { orgSettingsOrThrow } from '@/lib/ledger/policies'
+import { can, canAny, type Permission } from '@/lib/permissions'
 import {
   balancesCsv,
   forfeituresCsv,
@@ -36,15 +37,29 @@ import { dateParam, idParam, paramsOf, rangeParams } from '@/lib/reports/filters
  * handler because it returns a file; layouts do not guard route handlers, so
  * this checks access itself (rule 8).
  */
+const REPORT_PERMISSION: Record<string, Permission> = {
+  balances: 'REPORT_BALANCES',
+  leave: 'REPORT_LEAVE',
+  'leave-days': 'REPORT_LEAVE',
+  forfeitures: 'REPORT_FORFEITURES',
+  ledger: 'REPORT_LEDGER',
+}
+
 export async function GET(request: NextRequest) {
+  const params = paramsOf(request.nextUrl)
   try {
-    await requireReportsAccessOrThrow()
+    const user = await getCurrentUser()
+    if (!user) throw new ForbiddenError('Not signed in')
+    // Each report is its own permission; an unknown one falls through to the
+    // switch's answer below only for someone who may read some report.
+    const needed = typeof params.report === 'string' ? REPORT_PERMISSION[params.report] : undefined
+    if (needed ? !can(user, needed) : !canAny(user, Object.values(REPORT_PERMISSION))) {
+      throw new ForbiddenError('You do not have access to that report.')
+    }
   } catch (error) {
     if (error instanceof ForbiddenError) return new Response(error.message, { status: 403 })
     throw error
   }
-
-  const params = paramsOf(request.nextUrl)
   const org = await orgSettingsOrThrow()
   const today = todayIn(org.timezone)
   const type = idParam(params, 'type')

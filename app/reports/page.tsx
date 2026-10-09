@@ -1,9 +1,10 @@
 import { redirect } from 'next/navigation'
 
-import { requireReportsAccess } from '@/lib/authz'
+import { requireUser } from '@/lib/authz'
+import { REPORT_SECTIONS, sectionsFor } from '@/lib/permissions'
 
-/** Timesheets first: payroll is the report read most often. */
+/** The first report this person may read: timesheets, for payroll, when they may. */
 export default async function ReportsPage() {
-  await requireReportsAccess()
-  redirect('/reports/timesheets')
+  const user = await requireUser()
+  redirect(sectionsFor(user, REPORT_SECTIONS)[0]?.href ?? '/')
 }

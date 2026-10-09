@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 
 import { CarryoverWindowFields } from '@/components/config-fields'
 import { ConfigForm, SubmitButton } from '@/components/form'
-import { requireAdmin } from '@/lib/authz'
+import { requirePermission } from '@/lib/authz'
 import { saveCarryoverWindow } from '@/lib/config/actions'
 import { db } from '@/lib/db'
 
@@ -12,7 +12,7 @@ export const metadata = { title: 'Edit carryover window · TimeHero' }
 export default async function EditCarryoverWindowPage({
   params,
 }: PageProps<'/admin/rollover/windows/[id]'>) {
-  await requireAdmin()
+  await requirePermission('MANAGE_POLICIES')
   const { id } = await params
   const window = await db.carryoverWindow.findUnique({
     where: { id },

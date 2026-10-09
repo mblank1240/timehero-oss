@@ -9,6 +9,7 @@ import { markRead, savePreferences } from '@/lib/notifications/actions'
 import { DEFAULT_PREFERENCE, NOTIFICATION_LABELS, NOTIFICATION_TYPES } from '@/lib/notifications/channels'
 import { availableChannels, recentNotifications } from '@/lib/notifications/queries'
 import { orgSettingsOrThrow } from '@/lib/ledger/policies'
+import { canAny } from '@/lib/permissions'
 import { formatTimestamp } from '@/lib/requests/format'
 
 export const metadata = { title: 'Notifications · TimeHero' }
@@ -42,7 +43,8 @@ export default async function NotificationsPage() {
   const visible = NOTIFICATION_TYPES.filter(
     (t) =>
       channels.enabledTypes.includes(t) &&
-      (!NOTIFICATION_LABELS[t].adminOnly || user.role === 'ADMIN'),
+      (!NOTIFICATION_LABELS[t].forPermissions ||
+        canAny(user, NOTIFICATION_LABELS[t].forPermissions)),
   )
 
   return (

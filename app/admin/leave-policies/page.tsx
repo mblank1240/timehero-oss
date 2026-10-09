@@ -2,7 +2,7 @@ import Link from 'next/link'
 
 import { FIRST_YEAR_LABELS, LeavePolicyFields, METHOD_LABELS } from '@/components/config-fields'
 import { ConfigForm, SubmitButton } from '@/components/form'
-import { requireAdmin } from '@/lib/authz'
+import { requirePermission } from '@/lib/authz'
 import { saveLeavePolicy } from '@/lib/config/actions'
 import { db } from '@/lib/db'
 import { formatDuration } from '@/lib/duration'
@@ -12,7 +12,7 @@ export const metadata = { title: 'Leave policies · TimeHero' }
 
 
 export default async function LeavePoliciesPage() {
-  await requireAdmin()
+  await requirePermission('MANAGE_POLICIES')
   const [policies, types, settings] = await Promise.all([
     db.leavePolicy.findMany({
       orderBy: [{ leaveType: { sortOrder: 'asc' } }, { name: 'asc' }],

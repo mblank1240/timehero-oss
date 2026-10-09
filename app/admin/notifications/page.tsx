@@ -1,5 +1,5 @@
 import { Checkbox, ConfigForm, Field, SubmitButton } from '@/components/form'
-import { requireAdmin } from '@/lib/authz'
+import { requirePermission } from '@/lib/authz'
 import { db } from '@/lib/db'
 import { env, isPushConfigured } from '@/lib/env'
 import { mailTransport } from '@/lib/mail'
@@ -15,7 +15,7 @@ export const metadata = { title: 'Notifications · Administration · TimeHero' }
  * left waiting on an approver are chased.
  */
 export default async function NotificationSettingsPage() {
-  await requireAdmin()
+  await requirePermission('MANAGE_SETTINGS')
   const [org, subscribed, failed] = await Promise.all([
     orgSettingsOrThrow(),
     db.pushSubscription.groupBy({ by: ['employeeId'] }).then((rows) => rows.length),

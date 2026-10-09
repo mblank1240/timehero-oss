@@ -32,6 +32,7 @@ import {
   rerouteLeaveRequest,
   submitLeaveRequest,
 } from './service'
+import { can } from '@/lib/permissions'
 
 export type { ActionResult }
 
@@ -42,7 +43,7 @@ export type { ActionResult }
 async function currentActor(): Promise<Actor> {
   const user = await getCurrentUser()
   if (!user) throw new ForbiddenError('Not signed in')
-  return { id: user.id, role: user.role }
+  return { id: user.id, permissions: user.permissions }
 }
 
 function fail(error: string, fieldErrors?: Record<string, string[]>): ActionResult {
@@ -296,7 +297,7 @@ export async function previewRequest(input: unknown): Promise<RequestPreview> {
 
     // Rule 8: only an administrator may look at someone else's balance.
     const employeeId =
-      actor.role === 'ADMIN' && parsed.data.employeeId ? parsed.data.employeeId : actor.id
+      can(actor, 'MANAGE_TIME_RECORDS') && parsed.data.employeeId ? parsed.data.employeeId : actor.id
 
     const [org, employee, leaveType] = await Promise.all([
       orgSettingsOrThrow(),
@@ -318,7 +319,7 @@ export async function previewRequest(input: unknown): Promise<RequestPreview> {
     if (!daysWithin(days, previewWindow(today, org))) return { ok: false }
 
     const amending =
-      actor.role === 'ADMIN' && parsed.data.requestId
+      can(actor, 'MANAGE_TIME_RECORDS') && parsed.data.requestId
         ? await db.leaveRequest.findFirst({
             where: { id: parsed.data.requestId, employeeId },
             select: {

@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 
-import { canReadReports } from '@/lib/roles'
 import { buildGrid } from '@/lib/timesheets/grid'
 import { timeliness, timesheetDueDate } from '@/lib/timesheets/due'
 import { employeeCsvName, employeeCsvRows } from '@/lib/timesheets/report'
@@ -162,13 +161,5 @@ describe('zip', () => {
       at += 46 + length
     }
     expect(names).toEqual(['a.csv', 'b.csv'])
-  })
-})
-
-describe('report access', () => {
-  it('is for administrators and finance, not employees', () => {
-    expect(canReadReports({ role: 'ADMIN' })).toBe(true)
-    expect(canReadReports({ role: 'FINANCE' })).toBe(true)
-    expect(canReadReports({ role: 'EMPLOYEE' })).toBe(false)
   })
 })

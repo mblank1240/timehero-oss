@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation'
 import { ApprovalChainEditor } from '@/components/approval-chain-editor'
 import { EmployeeForm } from '@/components/employee-form'
 import { ActionButton, ConfigForm, Field, SubmitButton } from '@/components/form'
-import { requireAdmin } from '@/lib/authz'
+import { requirePermission } from '@/lib/authz'
 import {
   assignLeavePolicy,
   removeLeavePolicyAssignment,
@@ -14,6 +14,7 @@ import { db } from '@/lib/db'
 import { describeSkipped, planTypeAssignments } from '@/lib/employee-types/plan'
 import { typePolicies } from '@/lib/employee-types/service'
 import { unlinkIdentity, updateEmployee } from '@/lib/employees/actions'
+import { can } from '@/lib/permissions'
 import { formatLeaveDate } from '@/lib/requests/format'
 
 const PROVIDER_LABEL = { MICROSOFT: 'Microsoft', GOOGLE: 'Google' } as const
@@ -29,11 +30,11 @@ export default async function EditEmployeePage({
   params,
   searchParams,
 }: PageProps<'/admin/employees/[id]'>) {
-  const admin = await requireAdmin()
+  const admin = await requirePermission('MANAGE_EMPLOYEES')
   const { id } = await params
   const { created } = await searchParams
 
-  const [employee, departments, paySchedules, policies, candidates, employeeTypes] = await Promise.all([
+  const [employee, departments, paySchedules, policies, candidates, employeeTypes, accessRoles] = await Promise.all([
     db.employee.findUnique({
       where: { id },
       include: {
@@ -43,6 +44,7 @@ export default async function EditEmployeePage({
         },
         identities: { orderBy: { createdAt: 'asc' } },
         employeeType: { select: { id: true, name: true } },
+        accessRole: { select: { name: true } },
         leavePolicies: {
           orderBy: { effectiveFrom: 'desc' },
           include: {
@@ -78,9 +80,27 @@ export default async function EditEmployeePage({
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       select: { id: true, name: true, employmentType: true },
     }),
+    // Offered only to someone who may manage access; for anyone else the
+    // form shows the role read-only and does not post it.
+    can(admin, 'MANAGE_ACCESS')
+      ? db.accessRole.findMany({
+          orderBy: [{ allPermissions: 'desc' }, { name: 'asc' }],
+          select: { id: true, name: true },
+        })
+      : undefined,
   ])
 
   if (!employee) notFound()
+
+  // Their manager as the directory last reported it, for comparing with the
+  // chain below; the sync starts an empty chain with them.
+  const managerSubject = employee.identities.find((i) => i.directoryManagerSubject)?.directoryManagerSubject
+  const directoryManager = managerSubject
+    ? await db.identity.findFirst({
+        where: { subject: managerSubject },
+        select: { employee: { select: { firstName: true, lastName: true } } },
+      })
+    : null
 
   // Straight after creation from a type: what it could not assign, worked out
   // again from the type as it stands — the same plan the creation followed.
@@ -102,7 +122,7 @@ export default async function EditEmployeePage({
           <h1 className="text-2xl font-semibold">
             {employee.firstName} {employee.lastName}
           </h1>
-          {employee.isActive && employee.id !== admin.id && (
+          {employee.isActive && employee.id !== admin.id && can(admin, 'MANAGE_TIME_RECORDS') && (
             <Link href={`/admin/employees/${employee.id}/leave`} className="th-btn-secondary">
               Record leave
             </Link>
@@ -138,12 +158,15 @@ export default async function EditEmployeePage({
         departments={departments}
         paySchedules={paySchedules}
         employeeTypes={employeeTypes}
+        // Nobody changes their own access, so their own record shows it read-only.
+        accessRoles={employee.id === admin.id ? undefined : accessRoles}
+        accessRoleName={employee.accessRole?.name ?? null}
         submitLabel="Save changes"
         defaults={{
           email: employee.email,
           firstName: employee.firstName,
           lastName: employee.lastName,
-          role: employee.role,
+          accessRoleId: employee.accessRoleId ?? '',
           employmentType: employee.employmentType,
           hireDate: toDateInput(employee.hireDate),
           terminationDate: toDateInput(employee.terminationDate),
@@ -318,8 +341,18 @@ export default async function EditEmployeePage({
         <div>
           <h2 className="text-lg font-semibold">Approval chain</h2>
           <p className="mt-1 text-sm text-muted">
-            Requests go to each approver in order. An empty chain routes to all administrators.
+            Requests go to each approver in order. An empty chain routes to everyone who may act on
+            others’ time records.
           </p>
+          {managerSubject && (
+            <p className="mt-1 text-sm text-muted">
+              Manager in the directory:{' '}
+              {directoryManager
+                ? `${directoryManager.employee.firstName} ${directoryManager.employee.lastName}`
+                : 'someone with no employee record here'}
+              .
+            </p>
+          )}
         </div>
         <ApprovalChainEditor
           employeeId={employee.id}

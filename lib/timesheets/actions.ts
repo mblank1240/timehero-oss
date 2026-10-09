@@ -29,7 +29,7 @@ import {
 async function currentActor(): Promise<Actor> {
   const user = await getCurrentUser()
   if (!user) throw new ForbiddenError('Not signed in')
-  return { id: user.id, role: user.role }
+  return { id: user.id, permissions: user.permissions }
 }
 
 function fail(error: string, fieldErrors?: Record<string, string[]>): ActionResult {

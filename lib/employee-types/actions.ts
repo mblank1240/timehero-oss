@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { ForbiddenError, requireAdminOrThrow } from '@/lib/authz'
+import { ForbiddenError, requirePermissionOrThrow } from '@/lib/authz'
 import type { ActionResult } from '@/lib/employees/actions'
 
 import { employeeTypeInput } from './schema'
@@ -19,7 +19,7 @@ export async function saveEmployeeType(
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_EMPLOYEES')
 
     const parsed = employeeTypeInput.safeParse(Object.fromEntries(formData))
     if (!parsed.success) {

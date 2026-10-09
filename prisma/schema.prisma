@@ -15,13 +15,54 @@ datasource db {
   provider = "postgresql"
 }
 
+/// Superseded by `AccessRole`, and no longer read. The column stays for the
+/// release before, which reads it while the migration that replaced it runs;
+/// a later migration drops it.
 enum Role {
   EMPLOYEE
   ADMIN
-  /// An employee who can also read and export reports — timesheets for
-  /// payroll among them — but change nothing: no settings, no approvals
-  /// outside their own chain position, no unlocks.
   FINANCE
+}
+
+/// One thing an access role may do beyond what every employee can. What each
+/// means is in lib/permissions.ts.
+enum Permission {
+  MANAGE_ACCESS
+  MANAGE_EMPLOYEES
+  VIEW_TIME_RECORDS
+  MANAGE_TIME_RECORDS
+  MANAGE_LEDGER
+  MANAGE_POLICIES
+  MANAGE_DIRECTORY
+  MANAGE_JOBS
+  MANAGE_SETTINGS
+  REPORT_TIMESHEETS
+  REPORT_BALANCES
+  REPORT_LEAVE
+  REPORT_FORFEITURES
+  REPORT_LEDGER
+}
+
+/// A named set of permissions an administrator puts together and gives to
+/// people. An employee holds one or none; none is an ordinary employee.
+model AccessRole {
+  id   String @id @default(cuid())
+  name String @unique
+
+  description String @default("")
+
+  permissions Permission[] @default([])
+
+  /// Every permission, including any a later release adds. Only the built-in
+  /// Administrator role has it, and it cannot be edited or deleted.
+  allPermissions Boolean @default(false)
+
+  employees Employee[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("access_roles")
 }
 
 enum EmploymentType {
@@ -185,8 +226,13 @@ model Employee {
   firstName String
   lastName  String
 
+  /// Superseded by `accessRole`; see `Role`.
   role           Role           @default(EMPLOYEE)
   employmentType EmploymentType
+
+  /// What they may do beyond their own records. None: an ordinary employee.
+  accessRoleId String?
+  accessRole   AccessRole? @relation(fields: [accessRoleId], references: [id], onDelete: Restrict)
 
   hireDate        DateTime  @db.Date
   terminationDate DateTime? @db.Date
@@ -247,6 +293,7 @@ model Employee {
   @@index([departmentId])
   @@index([payScheduleId])
   @@index([employeeTypeId])
+  @@index([accessRoleId])
   @@map("employees")
 }
 
@@ -1010,6 +1057,11 @@ model Identity {
   /// From the last directory sync; null when the account was never synced.
   directoryAccountEnabled Boolean?
 
+  /// The directory id of the account's manager at the last sync; null when it
+  /// has none or was never synced. A change is what flags the employee's
+  /// approval chain for review.
+  directoryManagerSubject String?
+
   createdAt  DateTime  @default(now()) @db.Timestamptz
   lastUsedAt DateTime? @db.Timestamptz
 
@@ -1035,6 +1087,10 @@ model DirectoryConnection {
   /// Create an employee for someone in the directory who has none — at sign-in
   /// and at each sync. Off means sign-in only links existing employees.
   autoProvision Boolean @default(true)
+
+  /// Start an employee's approval chain with their directory manager when the
+  /// chain is empty, and flag the employee for review when the manager changes.
+  chainsFromManager Boolean @default(true)
 
   connectedById String?
   connectedBy   Employee? @relation(fields: [connectedById], references: [id], onDelete: SetNull)

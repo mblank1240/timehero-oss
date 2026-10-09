@@ -1,13 +1,14 @@
 import { EmployeeForm } from '@/components/employee-form'
-import { requireAdmin } from '@/lib/authz'
+import { requirePermission } from '@/lib/authz'
 import { db } from '@/lib/db'
 import { createEmployee } from '@/lib/employees/actions'
+import { can } from '@/lib/permissions'
 
 export const metadata = { title: 'Add employee · TimeHero' }
 
 export default async function NewEmployeePage() {
-  await requireAdmin()
-  const [departments, paySchedules, employeeTypes] = await Promise.all([
+  const user = await requirePermission('MANAGE_EMPLOYEES')
+  const [departments, paySchedules, employeeTypes, accessRoles] = await Promise.all([
     db.department.findMany({
       orderBy: { name: 'asc' },
       select: { id: true, name: true },
@@ -22,6 +23,12 @@ export default async function NewEmployeePage() {
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       select: { id: true, name: true, employmentType: true },
     }),
+    can(user, 'MANAGE_ACCESS')
+      ? db.accessRole.findMany({
+          orderBy: [{ allPermissions: 'desc' }, { name: 'asc' }],
+          select: { id: true, name: true },
+        })
+      : undefined,
   ])
 
   return (
@@ -32,6 +39,7 @@ export default async function NewEmployeePage() {
         departments={departments}
         paySchedules={paySchedules}
         employeeTypes={employeeTypes}
+        accessRoles={accessRoles}
         isNew
         defaults={{
           payScheduleId: paySchedules.find((s) => s.isDefault)?.id ?? '',

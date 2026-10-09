@@ -7,7 +7,7 @@ function form(overrides: Record<string, string> = {}) {
     email: 'New.Person@Example.test',
     firstName: 'New',
     lastName: 'Person',
-    role: 'EMPLOYEE',
+    accessRoleId: '',
     employmentType: 'HOURLY',
     hireDate: '2026-03-01',
     standardMinutesPerDay: '480',
@@ -74,8 +74,9 @@ describe('employeeInput', () => {
     )
   })
 
-  it('rejects an unknown role', () => {
-    expect(employeeInput.safeParse(form({ role: 'SUPERUSER' })).success).toBe(false)
+  it('reads no access role as null, and rejects one that is not an id', () => {
+    expect(employeeInput.safeParse(form()).data?.accessRoleId).toBeNull()
+    expect(employeeInput.safeParse(form({ accessRoleId: 'ADMIN' })).success).toBe(false)
   })
 })
 

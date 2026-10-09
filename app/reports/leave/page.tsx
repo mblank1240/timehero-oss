@@ -1,6 +1,6 @@
 import { RangeFilters } from '@/components/report-filters'
 import { todayIn } from '@/lib/accrual/dates'
-import { requireReportsAccess } from '@/lib/authz'
+import { requirePermission } from '@/lib/authz'
 import { formatDuration } from '@/lib/duration'
 import { orgSettingsOrThrow } from '@/lib/ledger/policies'
 import { leaveTakenReport, reportLeaveTypes } from '@/lib/reports/data'
@@ -15,7 +15,7 @@ export const metadata = { title: 'Leave taken · Reports · TimeHero' }
  * administrator's ledger adjustment is not a request and is not counted.
  */
 export default async function LeaveTakenReportPage({ searchParams }: PageProps<'/reports/leave'>) {
-  await requireReportsAccess()
+  await requirePermission('REPORT_LEAVE')
   const params = await searchParams
   const org = await orgSettingsOrThrow()
   const range = rangeParams(params, org, todayIn(org.timezone))

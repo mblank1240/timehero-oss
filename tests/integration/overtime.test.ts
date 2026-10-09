@@ -13,6 +13,8 @@ import {
 import type { Actor } from '@/lib/requests/chain'
 import { submitLeaveRequest } from '@/lib/requests/service'
 
+import { accessRoleId, permissionsFor } from './legacy-roles'
+
 /**
  * Overtime logs end to end against real Postgres: logging, the approval
  * chain, banking comp at the multiplier, spending it as leave — and rule 4,
@@ -50,13 +52,14 @@ async function person(
       firstName: RUN,
       lastName: key,
       role: opts.role ?? 'EMPLOYEE',
+      accessRoleId: await accessRoleId(opts.role),
       employmentType: opts.type ?? 'SALARIED_EXEMPT',
       hireDate: new Date('2015-01-01'),
       standardMinutesPerDay: DAY,
     },
   })
   employeeIds.push(employee.id)
-  return { id: employee.id, role: employee.role }
+  return { id: employee.id, permissions: await permissionsFor(opts.role) }
 }
 
 async function chain(employeeId: string, approvers: Actor[]) {

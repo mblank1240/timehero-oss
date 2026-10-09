@@ -1,5 +1,5 @@
 import { Checkbox, ConfigForm, Field, SubmitButton } from '@/components/form'
-import { requireAdmin } from '@/lib/authz'
+import { requirePermission } from '@/lib/authz'
 import { updateOrgSettings } from '@/lib/config/actions'
 import { WEEKDAYS } from '@/lib/config/schema'
 import { db } from '@/lib/db'
@@ -12,7 +12,7 @@ const MONTHS = [
 ]
 
 export default async function SettingsPage() {
-  await requireAdmin()
+  await requirePermission('MANAGE_SETTINGS')
   const [settings, compTypes] = await Promise.all([
     db.orgSettings.findUnique({ where: { id: 1 } }),
     // Only types hourly staff cannot hold may receive comp (rule 4).

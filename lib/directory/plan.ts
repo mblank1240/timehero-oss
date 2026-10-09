@@ -15,6 +15,14 @@
  * - **Flag** an employee whose bound account has been disabled. They are not
  *   deactivated: leaving is an HR decision with a termination date, and an
  *   account can be disabled for other reasons.
+ * - **Treat as disabled** a bound account the directory no longer lists —
+ *   deleted, most often, when someone leaves. Its employee is flagged and
+ *   cannot sign in by any route, exactly as for a disabled account; one that
+ *   reappears (restored within Microsoft's 30 days) is let back in by the
+ *   refresh. A listing that would remove more than half of the bound
+ *   accounts at once is not believed: it is far likelier to be a directory
+ *   or permission fault than half the staff leaving, so nothing is marked
+ *   and the sync reports it instead.
  *
  * Guests, disabled accounts nobody is bound to, and addresses outside the
  * organization's domains are skipped and counted.
@@ -34,6 +42,8 @@ export type DirectoryUser = {
   accountEnabled: boolean
   userType: string | null
   employeeHireDate: string | null
+  /** The directory id of their manager, when the directory records one. */
+  managerId: string | null
 }
 
 export type KnownEmployee = {
@@ -48,9 +58,15 @@ export type SyncPlan = {
   link: { employeeId: string; user: DirectoryUser }[]
   create: DirectoryUser[]
   /** Bound accounts, with the state the directory reports now. */
-  refresh: { subject: string; enabled: boolean; email: string }[]
+  refresh: { subject: string; enabled: boolean; email: string; managerSubject: string | null }[]
   /** Employees to mark for review because their account is disabled. */
   flagDisabled: string[]
+  /** Bound accounts the directory no longer lists, to record as disabled. */
+  missing: string[]
+  /** Active employees to mark for review because their account is gone. */
+  flagMissing: string[]
+  /** Missing accounts not marked, because too many were missing at once. */
+  missingWithheld: number
   skipped: {
     guests: number
     disabledUnbound: number
@@ -88,6 +104,9 @@ export function planDirectorySync(args: {
     create: [],
     refresh: [],
     flagDisabled: [],
+    missing: [],
+    flagMissing: [],
+    missingWithheld: 0,
     skipped: {
       guests: 0,
       disabledUnbound: 0,
@@ -103,6 +122,7 @@ export function planDirectorySync(args: {
         subject: user.id,
         enabled: user.accountEnabled,
         email: addressOf(user),
+        managerSubject: user.managerId,
       })
       if (!user.accountEnabled && bound.isActive) plan.flagDisabled.push(bound.id)
       continue
@@ -136,7 +156,41 @@ export function planDirectorySync(args: {
     if (args.autoProvision) plan.create.push(user)
   }
 
+  planMissing(plan, args.users, args.employees)
   return plan
+}
+
+/**
+ * The most bound accounts one sync may find missing without being doubted,
+ * whatever the proportion: a small organization losing two people in a week
+ * is ordinary.
+ */
+const MISSING_ALWAYS_BELIEVED = 3
+
+function planMissing(
+  plan: SyncPlan,
+  users: readonly DirectoryUser[],
+  employees: readonly KnownEmployee[],
+) {
+  const listed = new Set(users.map((u) => u.id))
+  const missing: { subject: string; employee: KnownEmployee }[] = []
+  let bound = 0
+  for (const employee of employees) {
+    for (const subject of employee.subjects) {
+      bound += 1
+      if (!listed.has(subject)) missing.push({ subject, employee })
+    }
+  }
+  if (missing.length === 0) return
+
+  const implausible =
+    users.length === 0 || (missing.length > MISSING_ALWAYS_BELIEVED && missing.length * 2 > bound)
+  if (implausible) {
+    plan.missingWithheld = missing.length
+    return
+  }
+  plan.missing = missing.map((m) => m.subject)
+  plan.flagMissing = [...new Set(missing.filter((m) => m.employee.isActive).map((m) => m.employee.id))]
 }
 
 /**

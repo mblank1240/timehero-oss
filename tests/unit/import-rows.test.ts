@@ -43,13 +43,21 @@ const base = {
 }
 
 describe('parseEmployeeRows', () => {
+  it('reads the role column as an access role name, blank or EMPLOYEE as none', () => {
+    const read = (role: string) => parseEmployeeRows([{ ...base, role }]).rows[0]?.accessRole
+    expect(read('')).toBeNull()
+    expect(read('employee')).toBeNull()
+    expect(read(' Finance ')).toBe('Finance')
+    expect(read('ADMIN')).toBe('ADMIN')
+  })
+
   it('reads a minimal row with every default', () => {
     const { rows, errors } = parseEmployeeRows([base])
     expect(errors).toEqual([])
     expect(rows[0]).toMatchObject({
       line: 2,
       email: 'sam@example.org',
-      role: 'EMPLOYEE',
+      accessRole: null,
       employmentType: 'HOURLY',
       standardMinutesPerDay: null,
       policies: [],

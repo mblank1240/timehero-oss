@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 
 import { writeAudit } from '@/lib/audit'
-import { ForbiddenError, requireAdminOrThrow } from '@/lib/authz'
+import { ForbiddenError, requirePermissionOrThrow } from '@/lib/authz'
 import type { ActionResult } from '@/lib/employees/actions'
 import { orgSettingsOrThrow } from '@/lib/ledger/policies'
 
@@ -30,7 +30,7 @@ export async function runJobNow(
   formData?: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_JOBS')
 
     // The name arrives bound from a server component, but it crosses the
     // network on its way back, so it is checked like any other input.

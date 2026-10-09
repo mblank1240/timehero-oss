@@ -7,6 +7,7 @@
  */
 
 import type { NotificationType } from '@prisma/client'
+import type { Permission } from '@/lib/permissions'
 
 export const NOTIFICATION_TYPES = [
   'APPROVAL_WAITING',
@@ -16,9 +17,12 @@ export const NOTIFICATION_TYPES = [
   'ROLLOVER_SUMMARY',
 ] as const satisfies readonly NotificationType[]
 
+/** Who is sent the year-end rollover summary: whoever runs the jobs or corrects the ledger. */
+export const ROLLOVER_SUMMARY_PERMISSIONS: readonly Permission[] = ['MANAGE_JOBS', 'MANAGE_LEDGER']
+
 export const NOTIFICATION_LABELS: Record<
   NotificationType,
-  { label: string; description: string; adminOnly?: boolean }
+  { label: string; description: string; forPermissions?: readonly Permission[] }
 > = {
   APPROVAL_WAITING: {
     label: 'Waiting on you',
@@ -40,7 +44,7 @@ export const NOTIFICATION_LABELS: Record<
   ROLLOVER_SUMMARY: {
     label: 'Year-end rollover',
     description: 'What the benefit-year rollover forfeited and carried.',
-    adminOnly: true,
+    forPermissions: ROLLOVER_SUMMARY_PERMISSIONS,
   },
 }
 

@@ -75,8 +75,25 @@ really granted — records a `DirectoryConnection`, and runs a first sync.
   is recorded as disabled (`Identity.directoryAccountEnabled = false`).
   Unlinking that account on the employee's page, or a sync that sees it
   enabled again, lets them back in.
+- A linked account the directory **no longer lists** — deleted, usually,
+  when someone leaves — is treated exactly as a disabled one: recorded as
+  disabled, its employee flagged, and no sign-in by any route. That includes
+  emailed links, since a leaver's address is often forwarded to a manager or
+  turned into a shared mailbox. Restored within Microsoft's 30 days, it is
+  let back in by the next sync. A sync that would find more than half of the
+  linked accounts missing at once (and more than three) blocks nobody and
+  says so on the Directory page: that is a permission or directory fault,
+  not half the staff leaving. Accrual still stops only at a termination date
+  or deactivation — the flag is the prompt to set one.
 - Guests, disabled accounts nobody holds (shared mailboxes) and addresses
   outside the domains are skipped and counted. Domains are re-read each sync.
+- With `chainsFromManager` on (the default), an employee whose approval
+  chain is empty gets their Entra **manager** as step 1, when the manager is
+  an active employee. A manager who changes later **flags** the employee for
+  review unless their chain already starts with the new one; a chain is never
+  rewritten. The first sync to read managers records them without flagging.
+  `lib/directory/managers.ts` is the pure rule. The manager comes from
+  `$expand=manager` and needs nothing beyond `User.Read.All`.
 
 **Emailed links.** A request is recorded whether or not the address exists,
 and answered the same way either way. Only an employee who may sign in gets a

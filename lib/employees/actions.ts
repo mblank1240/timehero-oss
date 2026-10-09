@@ -3,9 +3,11 @@
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 
+import { AccessError, assertSomeoneManagesAccess } from '@/lib/access/service'
 import { diff, writeAudit } from '@/lib/audit'
-import { ForbiddenError, requireAdminOrThrow } from '@/lib/authz'
+import { ForbiddenError, requirePermissionOrThrow, type CurrentUser } from '@/lib/authz'
 import { db } from '@/lib/db'
+import { can, effectivePermissions, outranksOrEquals } from '@/lib/permissions'
 
 import { approvalChainInput, departmentInput, employeeInput } from './schema'
 import { createEmployeeRecord } from './service'
@@ -32,7 +34,7 @@ function fail(error: string, fieldErrors?: Record<string, string[]>): Failure {
 }
 
 function handle(error: unknown): Failure {
-  if (error instanceof ForbiddenError) return fail(error.message)
+  if (error instanceof ForbiddenError || error instanceof AccessError) return fail(error.message)
   // The only unique constraint on employees is email, and on departments, name.
   if (typeof error === 'object' && error !== null && 'code' in error) {
     if ((error as { code: string }).code === 'P2002') {
@@ -62,14 +64,16 @@ async function createEmployeeInner(
   formData: FormData,
 ): Promise<{ ok: true; id: string; fromType: boolean } | Failure> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_EMPLOYEES')
 
     const parsed = employeeInput.safeParse(Object.fromEntries(formData))
     if (!parsed.success) {
       return fail('Please correct the errors below.', parsed.error.flatten().fieldErrors)
     }
 
-    const result = await createEmployeeRecord(actor.id, parsed.data)
+    // Only someone who may manage access gives a new employee a role.
+    const data = can(actor, 'MANAGE_ACCESS') ? parsed.data : { ...parsed.data, accessRoleId: null }
+    const result = await createEmployeeRecord(actor.id, data)
     if (!result.ok) return result
 
     revalidatePath('/admin/employees')
@@ -97,7 +101,7 @@ async function updateEmployeeInner(
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_EMPLOYEES')
 
     const parsed = employeeInput.safeParse(Object.fromEntries(formData))
     if (!parsed.success) {
@@ -106,11 +110,17 @@ async function updateEmployeeInner(
 
     const before = await db.employee.findUnique({ where: { id: employeeId } })
     if (!before) return fail('That employee no longer exists.')
+    const refused = await refuseIfOutranked(actor, employeeId)
+    if (refused) return refused
 
-    // An admin removing their own access would lock themselves out mid-session
-    // with no way back in, so block it rather than let them discover it.
-    if (actor.id === employeeId && parsed.data.role !== 'ADMIN') {
-      return fail('You cannot remove your own administrator access.')
+    // Someone who may not manage access cannot change anyone's, whatever the
+    // form posts. Nobody changes their own: it would either lock them out
+    // mid-session or let them raise themselves.
+    const accessRoleId = can(actor, 'MANAGE_ACCESS')
+      ? parsed.data.accessRoleId
+      : before.accessRoleId
+    if (actor.id === employeeId && accessRoleId !== before.accessRoleId) {
+      return fail('You cannot change your own access. Ask someone else who manages access.')
     }
     if (actor.id === employeeId && !parsed.data.isActive) {
       return fail('You cannot deactivate your own account.')
@@ -132,9 +142,13 @@ async function updateEmployeeInner(
 
     // Saving the record is the review: whatever the directory could not
     // know has now been looked at by an administrator.
-    const after = await db.employee.update({
-      where: { id: employeeId },
-      data: { ...parsed.data, needsReview: false },
+    const after = await db.$transaction(async (tx) => {
+      const updated = await tx.employee.update({
+        where: { id: employeeId },
+        data: { ...parsed.data, accessRoleId, needsReview: false },
+      })
+      await assertSomeoneManagesAccess(tx)
+      return updated
     })
 
     const changed = diff(
@@ -170,7 +184,7 @@ async function updateEmployeeInner(
  */
 export async function deactivateEmployee(employeeId: string): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_EMPLOYEES')
 
     if (actor.id === employeeId) {
       return fail('You cannot deactivate your own account.')
@@ -178,8 +192,13 @@ export async function deactivateEmployee(employeeId: string): Promise<ActionResu
 
     const before = await db.employee.findUnique({ where: { id: employeeId } })
     if (!before) return fail('That employee no longer exists.')
+    const refused = await refuseIfOutranked(actor, employeeId)
+    if (refused) return refused
 
-    await db.employee.update({ where: { id: employeeId }, data: { isActive: false } })
+    await db.$transaction(async (tx) => {
+      await tx.employee.update({ where: { id: employeeId }, data: { isActive: false } })
+      await assertSomeoneManagesAccess(tx)
+    })
 
     await writeAudit({
       actorId: actor.id,
@@ -202,7 +221,7 @@ export async function createDepartment(
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_EMPLOYEES')
 
     const parsed = departmentInput.safeParse(Object.fromEntries(formData))
     if (!parsed.success) {
@@ -239,7 +258,7 @@ export async function setApprovalChain(
   approverIds: string[],
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_EMPLOYEES')
 
     const parsed = approvalChainInput.safeParse({ employeeId, approverIds })
     if (!parsed.success) {
@@ -302,6 +321,21 @@ export async function setApprovalChain(
   }
 }
 
+/**
+ * Someone may change another's record only when they hold every permission
+ * that person does: otherwise whoever manages employees could point an
+ * administrator's address at their own mailbox and sign in as them.
+ */
+async function refuseIfOutranked(actor: CurrentUser, employeeId: string): Promise<Failure | null> {
+  const target = await db.employee.findUnique({
+    where: { id: employeeId },
+    select: { accessRole: { select: { permissions: true, allPermissions: true } } },
+  })
+  if (!target) return fail('That employee no longer exists.')
+  if (outranksOrEquals(actor, { permissions: effectivePermissions(target.accessRole) })) return null
+  return fail('This person holds permissions you do not, so only someone who holds them too can change their record.')
+}
+
 function isUniqueViolation(error: unknown): boolean {
   return (
     typeof error === 'object' &&
@@ -317,9 +351,11 @@ function isUniqueViolation(error: unknown): boolean {
  */
 export async function unlinkIdentity(identityId: string): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_EMPLOYEES')
     const before = await db.identity.findUnique({ where: { id: identityId } })
     if (!before) return fail('That sign-in is no longer linked.')
+    const refused = await refuseIfOutranked(actor, before.employeeId)
+    if (refused) return refused
 
     await db.identity.delete({ where: { id: identityId } })
     await writeAudit({

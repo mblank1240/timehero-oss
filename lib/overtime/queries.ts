@@ -7,6 +7,7 @@
 import type { CurrentUser } from '@/lib/authz'
 import { db } from '@/lib/db'
 import { currentStep } from '@/lib/requests/chain'
+import { can } from '@/lib/permissions'
 
 const PERSON = { select: { id: true, firstName: true, lastName: true } } as const
 
@@ -62,7 +63,7 @@ export async function overtimeDetail(id: string) {
 type Detail = NonNullable<Awaited<ReturnType<typeof overtimeDetail>>>
 
 export function canViewOvertime(viewer: CurrentUser, log: Detail): boolean {
-  if (viewer.role === 'ADMIN') return true
+  if (can(viewer, 'VIEW_TIME_RECORDS')) return true
   if (viewer.id === log.employeeId) return true
   return log.steps.some((s) => s.approverId === viewer.id || s.decidedById === viewer.id)
 }
@@ -85,7 +86,7 @@ export async function overtimeInboxFor(viewer: CurrentUser) {
       steps: {
         some: {
           status: 'PENDING',
-          ...(viewer.role === 'ADMIN'
+          ...(can(viewer, 'MANAGE_TIME_RECORDS')
             ? { OR: [{ approverId: viewer.id }, { approverId: null }] }
             : { approverId: viewer.id }),
         },
@@ -99,7 +100,7 @@ export async function overtimeInboxFor(viewer: CurrentUser) {
     const current = currentStep(log.steps)
     if (!current) return false
     return (
-      current.approverId === viewer.id || (current.approverId === null && viewer.role === 'ADMIN')
+      current.approverId === viewer.id || (current.approverId === null && can(viewer, 'MANAGE_TIME_RECORDS'))
     )
   })
 }

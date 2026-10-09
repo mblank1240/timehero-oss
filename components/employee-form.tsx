@@ -10,7 +10,7 @@ export type EmployeeFormValues = {
   email: string
   firstName: string
   lastName: string
-  role: 'EMPLOYEE' | 'ADMIN' | 'FINANCE'
+  accessRoleId: string
   employmentType: 'HOURLY' | 'SALARIED_EXEMPT'
   hireDate: string
   terminationDate: string
@@ -27,6 +27,13 @@ type Props = {
   paySchedules?: { id: string; name: string }[]
   employeeTypes?: { id: string; name: string; employmentType: 'HOURLY' | 'SALARIED_EXEMPT' }[]
   /**
+   * The roles to choose from, for someone who may manage access. Without it
+   * the field is shown read-only and not posted, so the record keeps its role.
+   */
+  accessRoles?: { id: string; name: string }[]
+  /** The current role's name, shown when it cannot be changed here. */
+  accessRoleName?: string | null
+  /**
    * On a new employee, choosing a type fills in its employment type and the
    * type's leave policies are assigned on save. On an existing one the type is
    * a label only, and choosing it changes nothing else.
@@ -41,6 +48,8 @@ export function EmployeeForm({
   departments,
   paySchedules = [],
   employeeTypes = [],
+  accessRoles,
+  accessRoleName = null,
   isNew = false,
   defaults,
   submitLabel,
@@ -131,18 +140,29 @@ export function EmployeeForm({
       </Field>
 
       <div className="grid gap-5 sm:grid-cols-2">
-        <Field label="Role" name="role" errors={errors.role}>
-          <select
-            id="role"
-            name="role"
-            defaultValue={defaults?.role ?? 'EMPLOYEE'}
-            className="th-input"
-          >
-            <option value="EMPLOYEE">Employee</option>
-            <option value="ADMIN">Administrator</option>
-            <option value="FINANCE">Finance (reads and exports reports)</option>
-          </select>
-        </Field>
+        {accessRoles ? (
+          <Field label="Access" name="accessRoleId" errors={errors.accessRoleId}>
+            <select
+              id="accessRoleId"
+              name="accessRoleId"
+              defaultValue={defaults?.accessRoleId ?? ''}
+              className="th-input"
+            >
+              <option value="">Employee (their own records only)</option>
+              {accessRoles.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : (
+          <div>
+            <p className="th-label">Access</p>
+            <p className="py-2 text-sm">{accessRoleName ?? 'Employee'}</p>
+            <p className="text-xs text-muted">Changed by someone who manages access.</p>
+          </div>
+        )}
 
         <Field
           label="Employment type"

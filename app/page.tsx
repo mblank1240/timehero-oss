@@ -6,7 +6,6 @@ import { requireUser } from '@/lib/authz'
 import { leaveSummariesFor, type LeaveTypeSummary } from '@/lib/dashboard/queries'
 import { db } from '@/lib/db'
 import { formatDuration } from '@/lib/duration'
-import { ROLE_LABEL } from '@/lib/employees/schema'
 import { orgSettingsOrThrow } from '@/lib/ledger/policies'
 import { formatDateSpan, formatLeaveDate } from '@/lib/requests/format'
 import { requestStatusCounts, upcomingFor } from '@/lib/requests/queries'
@@ -111,7 +110,7 @@ export default async function DashboardPage() {
           <h2 className="text-sm font-semibold">Your record</h2>
           <dl className="mt-3 space-y-1 text-sm">
             <Row label="Email" value={user.email} />
-            <Row label="Role" value={ROLE_LABEL[user.role]} />
+            <Row label="Access" value={user.accessRoleName ?? 'Employee'} />
             <Row
               label="Employment type"
               value={user.employmentType === 'HOURLY' ? 'Hourly' : 'Salaried (exempt)'}

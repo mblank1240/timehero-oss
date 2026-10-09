@@ -43,7 +43,7 @@ async function person(key: string): Promise<Actor> {
     },
   })
   employeeIds.push(employee.id)
-  return { id: employee.id, role: employee.role }
+  return { id: employee.id, permissions: [] }
 }
 
 /** A request as it stood when submitted: pending, on step 1 of 1. */

@@ -42,8 +42,10 @@ import {
   rolloverConfiguration,
   subjectsForAccrual,
 } from '@/lib/ledger/policies'
+import { ROLLOVER_SUMMARY_PERMISSIONS } from '@/lib/notifications/channels'
 import { createNotifications } from '@/lib/notifications/notify'
 import type { PayScheduleInput } from '@/lib/payperiods/generate'
+import { holdersWhere } from '@/lib/permissions'
 
 import { rolloverRunFor } from './rollover-log'
 import { describeFailure, throwIfFailures, type JobOutcome, type JobRunContext } from './runner'
@@ -281,7 +283,8 @@ async function notifyAdministrators(detail: {
   failures: number
 }) {
   const admins = await db.employee.findMany({
-    where: { role: 'ADMIN', isActive: true },
+    // Whoever runs the jobs or corrects the ledger: the two who act on it.
+    where: { ...holdersWhere(ROLLOVER_SUMMARY_PERMISSIONS), isActive: true },
     select: { id: true },
   })
   const hours = (minutes: number) => formatDuration(minutes, { unit: 'HOURS', minutesPerDay: 1 })

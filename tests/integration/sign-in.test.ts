@@ -94,6 +94,7 @@ function user(id: string, local: string, overrides: Partial<DirectoryUser> = {})
     accountEnabled: true,
     userType: 'Member',
     employeeHireDate: null,
+    managerId: null,
     ...overrides,
   }
 }
@@ -112,6 +113,9 @@ afterAll(async () => {
   const ids = [...new Set([...employeeIds, ...all.map((e) => e.id)])]
   await db.auditLog.deleteMany({
     where: { OR: [{ entityId: { in: ids } }, { action: 'directory.sync', entityId: 'MICROSOFT' }] },
+  })
+  await db.approvalChainStep.deleteMany({
+    where: { OR: [{ employeeId: { in: ids } }, { approverId: { in: ids } }] },
   })
   await db.signInLinkRequest.deleteMany({ where: { email: { contains: RUN } } })
   await db.directoryConnection.deleteMany({ where: { tenantId: TENANT } })
@@ -368,5 +372,108 @@ describe('the directory sync', () => {
       directory: async () => directoryOf(users, [DOMAIN, `extra-${DOMAIN}`]),
     })
     expect(again.detail?.MICROSOFT).toMatchObject({ created: 0, linked: 0 })
+  })
+
+  it('starts an empty approval chain with the manager, then flags a new manager', async () => {
+    const pat = await person('mgr-pat')
+    await person('mgr-lin')
+    const sam = await person('mgr-sam')
+    const users = (manager: string) => [
+      user(`${RUN}-mgr-pat`, 'mgr-pat'),
+      user(`${RUN}-mgr-lin`, 'mgr-lin'),
+      user(`${RUN}-mgr-sam`, 'mgr-sam', { managerId: `${RUN}-mgr-${manager}` }),
+    ]
+    const chainOf = async (employeeId: string) =>
+      (await db.approvalChainStep.findMany({ where: { employeeId }, orderBy: { step: 'asc' } })).map(
+        (s) => s.approverId,
+      )
+
+    const first = await runDirectorySync(new Date('2026-10-09T00:00:00Z'), {
+      directory: async () => directoryOf(users('pat')),
+    })
+    expect(first.detail?.MICROSOFT).toMatchObject({ chainsPrefilled: 1, flaggedManagerChanged: 0 })
+    expect(await chainOf(sam.id)).toEqual([pat.id])
+    expect(await chainOf(pat.id)).toEqual([])
+
+    // An administrator reviewed Sam; then the directory moves them to Lin.
+    await db.employee.update({ where: { id: sam.id }, data: { needsReview: false } })
+    const moved = await runDirectorySync(new Date('2026-10-10T00:00:00Z'), {
+      directory: async () => directoryOf(users('lin')),
+    })
+    expect(moved.detail?.MICROSOFT).toMatchObject({ chainsPrefilled: 0, flaggedManagerChanged: 1 })
+    // Flagged, never rewritten.
+    expect(await chainOf(sam.id)).toEqual([pat.id])
+    expect((await db.employee.findUniqueOrThrow({ where: { id: sam.id } })).needsReview).toBe(true)
+
+    // Nothing has changed since, so the next sync flags nothing more.
+    await db.employee.update({ where: { id: sam.id }, data: { needsReview: false } })
+    const same = await runDirectorySync(new Date('2026-10-11T00:00:00Z'), {
+      directory: async () => directoryOf(users('lin')),
+    })
+    expect(same.detail?.MICROSOFT).toMatchObject({ chainsPrefilled: 0, flaggedManagerChanged: 0 })
+  })
+
+  it('blocks and flags someone whose account is deleted, and lets them back if it returns', async () => {
+    const gone = await person('deleted')
+    await db.identity.create({
+      data: {
+        employeeId: gone.id,
+        provider: 'MICROSOFT',
+        subject: `${RUN}-deleted`,
+        tenant: TENANT,
+        email: gone.email,
+        directoryAccountEnabled: true,
+      },
+    })
+    // Everyone this tenant has bound so far, as the directory lists them; the
+    // earlier tests here bound several, and a listing missing most of them
+    // would be withheld.
+    const everyone = async () =>
+      (
+        await db.identity.findMany({
+          where: { tenant: TENANT },
+          select: { subject: true, email: true, directoryAccountEnabled: true },
+        })
+      ).map((i) =>
+        user(i.subject, (i.email ?? i.subject).split('@')[0], {
+          accountEnabled: i.directoryAccountEnabled !== false,
+        }),
+      )
+    const signIn = () =>
+      resolveExternalSignIn({
+        provider: 'MICROSOFT',
+        subject: `${RUN}-deleted`,
+        tenant: TENANT,
+        email: gone.email,
+        emailVerified: true,
+      })
+    const listing = await everyone()
+    const without = listing.filter((u) => u.id !== `${RUN}-deleted`)
+
+    const first = await runDirectorySync(new Date('2026-10-12T00:00:00Z'), {
+      directory: async () => directoryOf(without),
+    })
+    expect(first.detail?.MICROSOFT).toMatchObject({ flaggedMissing: 1, missingWithheld: 0 })
+    expect((await db.employee.findUniqueOrThrow({ where: { id: gone.id } })).needsReview).toBe(true)
+    expect(await signIn()).toEqual({ ok: false, refusal: 'DirectoryDisabled' })
+    // Nor by emailed link — the address may now reach someone else's mailbox.
+    expect(await request({ email: gone.email, ipAddress: '203.0.113.9' })).toBe('SENT_IF_KNOWN')
+    expect(await tokenMailedTo(gone.email)).toBeNull()
+
+    // Still gone the next day: flagged again, audited once.
+    await runDirectorySync(new Date('2026-10-13T00:00:00Z'), {
+      directory: async () => directoryOf(without),
+    })
+    expect(
+      await db.auditLog.count({
+        where: { entityId: gone.id, action: 'employee.flagDirectoryMissing' },
+      }),
+    ).toBe(1)
+
+    // Restored from the recycle bin: the refresh sees it enabled again.
+    await runDirectorySync(new Date('2026-10-14T00:00:00Z'), {
+      directory: async () => directoryOf(listing),
+    })
+    expect((await signIn()).ok).toBe(true)
   })
 })

@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 
 import { diff, writeAudit } from '@/lib/audit'
-import { ForbiddenError, requireAdminOrThrow } from '@/lib/authz'
+import { ForbiddenError, requirePermissionOrThrow } from '@/lib/authz'
 import { db } from '@/lib/db'
 import type { ActionResult } from '@/lib/employees/actions'
 import { accruableBy, overlapsAny } from '@/lib/employees/assignments'
@@ -58,7 +58,7 @@ export async function updateOrgSettings(
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_SETTINGS')
 
     const parsed = parseForm(orgSettingsInput, formData)
     if (!parsed.success) {
@@ -120,7 +120,7 @@ export async function savePaySchedule(
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_POLICIES')
 
     const parsed = parseForm(payScheduleInput, formData)
     if (!parsed.success) {
@@ -185,7 +185,7 @@ export async function syncPayPeriods(
   _formData?: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_POLICIES')
 
     const result = await syncPayPeriodsFor(payScheduleId, { actorId: actor.id })
     if (!result) return fail('That pay schedule no longer exists.')
@@ -206,7 +206,7 @@ export async function createHoliday(
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_POLICIES')
 
     const parsed = parseForm(holidayInput, formData)
     if (!parsed.success) {
@@ -236,7 +236,7 @@ export async function deleteHoliday(
   _formData?: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_POLICIES')
 
     const before = await db.holiday.findUnique({ where: { id: holidayId } })
     if (!before) return fail('That holiday no longer exists.')
@@ -268,7 +268,7 @@ export async function saveLeaveType(
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_POLICIES')
 
     const parsed = parseForm(leaveTypeInput, formData)
     if (!parsed.success) {
@@ -309,7 +309,7 @@ export async function saveLeavePolicy(
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_POLICIES')
 
     const parsed = parseForm(leavePolicyInput, formData)
     if (!parsed.success) {
@@ -350,7 +350,7 @@ export async function assignLeavePolicy(
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_EMPLOYEES')
 
     const parsed = parseForm(employeePolicyInput, formData)
     if (!parsed.success) {
@@ -423,7 +423,7 @@ export async function updateLeavePolicyAssignment(
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_EMPLOYEES')
 
     const parsed = parseForm(employeePolicyUpdateInput, formData)
     if (!parsed.success) {
@@ -474,7 +474,7 @@ export async function removeLeavePolicyAssignment(
   assignmentId: string,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_EMPLOYEES')
 
     const before = await db.employeeLeavePolicy.findUnique({ where: { id: assignmentId } })
     if (!before) return fail('That assignment no longer exists.')
@@ -505,7 +505,7 @@ export async function saveRolloverRule(
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_POLICIES')
 
     const parsed = parseForm(rolloverRuleInput, formData)
     if (!parsed.success) {
@@ -542,7 +542,7 @@ export async function saveCarryoverWindow(
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_POLICIES')
 
     const parsed = parseForm(carryoverWindowInput, formData)
     if (!parsed.success) {
@@ -579,7 +579,7 @@ export async function deleteCarryoverWindow(
   _formData?: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_POLICIES')
 
     const before = await db.carryoverWindow.findUnique({ where: { id: windowId } })
     if (!before) return fail('That window no longer exists.')

@@ -16,6 +16,7 @@ import { formatDateSpan, formatLeaveDate } from '@/lib/requests/format'
 import { formatPeriod } from '@/lib/timesheets/format'
 
 import { createNotifications, type NotificationDraft } from './notify'
+import { holdersWhere } from '@/lib/permissions'
 
 type Client = PrismaClient | Prisma.TransactionClient
 
@@ -105,8 +106,8 @@ export async function describeSubject(subject: Subject, client: Client = db): Pr
 }
 
 /**
- * Who a step waits on: its approver, or — the empty-chain case — every
- * active administrator except the requester, any of whom may act.
+ * Who a step waits on: its approver, or — the empty-chain case — everyone
+ * active who may act on others' time records, except the requester.
  */
 export async function stepRecipients(
   step: { approverId: string | null },
@@ -115,7 +116,7 @@ export async function stepRecipients(
 ): Promise<string[]> {
   if (step.approverId) return [step.approverId]
   const admins = await client.employee.findMany({
-    where: { role: 'ADMIN', isActive: true, id: { not: requesterId } },
+    where: { ...holdersWhere(['MANAGE_TIME_RECORDS']), isActive: true, id: { not: requesterId } },
     select: { id: true },
   })
   return admins.map((a) => a.id)

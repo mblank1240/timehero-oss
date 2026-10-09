@@ -6,6 +6,7 @@ import { employeeInput } from '@/lib/employees/schema'
 import { createEmployeeRecord } from '@/lib/employees/service'
 import { parseEmployeeRows } from '@/lib/import/rows'
 import { runImport } from '@/lib/import/service'
+import { holdersWhere } from '@/lib/permissions'
 
 import { applyConfiguration } from '../../prisma/config/apply'
 import { EXAMPLE_CONFIG, loadOrganizationConfig } from '../../prisma/config/organization'
@@ -57,7 +58,9 @@ const assignmentsOf = (email: string) =>
   })
 
 beforeAll(async () => {
-  const admin = await db.employee.findFirst({ where: { role: 'ADMIN', isActive: true } })
+  const admin = await db.employee.findFirst({
+    where: { ...holdersWhere(['MANAGE_EMPLOYEES']), isActive: true },
+  })
   if (!admin) throw new Error('Run `npm run db:seed` before the integration tests.')
   actorId = admin.id
 

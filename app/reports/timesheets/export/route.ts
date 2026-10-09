@@ -1,6 +1,6 @@
 import type { NextRequest } from 'next/server'
 
-import { ForbiddenError, requireReportsAccessOrThrow } from '@/lib/authz'
+import { ForbiddenError, requirePermissionOrThrow } from '@/lib/authz'
 import { toCsv } from '@/lib/csv'
 import { gridFor, sheetHead } from '@/lib/timesheets/data'
 import {
@@ -23,7 +23,7 @@ import { zip } from '@/lib/zip'
  */
 export async function GET(request: NextRequest) {
   try {
-    await requireReportsAccessOrThrow()
+    await requirePermissionOrThrow('REPORT_TIMESHEETS')
   } catch (error) {
     if (error instanceof ForbiddenError) return new Response(error.message, { status: 403 })
     throw error
