@@ -10,7 +10,9 @@ Google, or an emailed link — no passwords. MIT licensed.
 - **Leave** with balances that are always explained: every grant, use,
   rollover and forfeit is an entry in an append-only ledger. Lump-sum or
   per-pay-period accrual, waiting periods, tenure tiers, rollover caps in the
-  employee's own days, and carryover windows.
+  employee's own days, and carryover windows. Employee types (Pastor,
+  Director, whatever you call your staff) start each new hire on the right
+  policies.
 - **Requests and approvals** through per-employee approval chains, with an
   approver inbox, escalating reminders and a daily digest.
 - **Comp time** banked from approved overtime by salaried exempt staff (and

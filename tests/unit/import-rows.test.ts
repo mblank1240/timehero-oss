@@ -98,6 +98,32 @@ describe('parseEmployeeRows', () => {
     const { errors } = parseEmployeeRows([{ ...base, termination_date: '2023-01-01' }])
     expect(errors[0].message).toMatch(/precede/)
   })
+
+  it('reads an employee type, and has no type without the column', () => {
+    expect(parseEmployeeRows([base]).rows[0].employeeType).toBeNull()
+    const { rows } = parseEmployeeRows([{ ...base, type: ' Associate ' }])
+    expect(rows[0]).toMatchObject({ employeeType: 'Associate', employmentType: 'HOURLY' })
+  })
+
+  it('lets a row with a type leave the employment type to it', () => {
+    const { rows, errors } = parseEmployeeRows([{ ...base, employment_type: '', type: 'Pastor' }])
+    expect(errors).toEqual([])
+    expect(rows[0]).toMatchObject({ employeeType: 'Pastor', employmentType: null })
+  })
+
+  it('still requires an employment type on a row without a type', () => {
+    const { employment_type: _omitted, ...withoutType } = base
+    for (const row of [withoutType, { ...base, employment_type: '' }]) {
+      const { rows, errors } = parseEmployeeRows([row])
+      expect(rows).toEqual([])
+      expect(errors[0].message).toMatch(/^employment_type: Required, unless/)
+    }
+  })
+
+  it('still refuses an employment type it does not recognise beside a type', () => {
+    const { errors } = parseEmployeeRows([{ ...base, employment_type: 'volunteer', type: 'Pastor' }])
+    expect(errors[0].message).toMatch(/^employment_type/)
+  })
 })
 
 describe('parseBalanceRows', () => {

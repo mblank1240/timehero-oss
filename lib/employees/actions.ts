@@ -8,6 +8,7 @@ import { ForbiddenError, requireAdminOrThrow } from '@/lib/authz'
 import { db } from '@/lib/db'
 
 import { approvalChainInput, departmentInput, employeeInput } from './schema'
+import { createEmployeeRecord } from './service'
 
 export type ActionResult =
   | { ok: true }
@@ -24,11 +25,13 @@ export type FormAction = (
   formData: FormData,
 ) => Promise<ActionResult>
 
-function fail(error: string, fieldErrors?: Record<string, string[]>): ActionResult {
+type Failure = Extract<ActionResult, { ok: false }>
+
+function fail(error: string, fieldErrors?: Record<string, string[]>): Failure {
   return { ok: false, error, fieldErrors }
 }
 
-function handle(error: unknown): ActionResult {
+function handle(error: unknown): Failure {
   if (error instanceof ForbiddenError) return fail(error.message)
   // The only unique constraint on employees is email, and on departments, name.
   if (typeof error === 'object' && error !== null && 'code' in error) {
@@ -46,12 +49,18 @@ export async function createEmployee(
 ): Promise<ActionResult> {
   const result = await createEmployeeInner(formData)
   // `redirect` throws a control-flow signal, so it must run outside the
-  // try/catch that would otherwise swallow it.
-  if (result.ok) redirect('/admin/employees')
+  // try/catch that would otherwise swallow it. Someone created from an
+  // employee type lands on their own record, where the policies the type put
+  // them on — and any it could not — are shown.
+  if (result.ok) {
+    redirect(result.fromType ? `/admin/employees/${result.id}?created=1` : '/admin/employees')
+  }
   return result
 }
 
-async function createEmployeeInner(formData: FormData): Promise<ActionResult> {
+async function createEmployeeInner(
+  formData: FormData,
+): Promise<{ ok: true; id: string; fromType: boolean } | Failure> {
   try {
     const actor = await requireAdminOrThrow()
 
@@ -60,18 +69,11 @@ async function createEmployeeInner(formData: FormData): Promise<ActionResult> {
       return fail('Please correct the errors below.', parsed.error.flatten().fieldErrors)
     }
 
-    const employee = await db.employee.create({ data: parsed.data })
-
-    await writeAudit({
-      actorId: actor.id,
-      action: 'employee.create',
-      entityType: 'Employee',
-      entityId: employee.id,
-      after: employee,
-    })
+    const result = await createEmployeeRecord(actor.id, parsed.data)
+    if (!result.ok) return result
 
     revalidatePath('/admin/employees')
-    return { ok: true }
+    return { ok: true, id: result.value.id, fromType: parsed.data.employeeTypeId !== null }
   } catch (error) {
     if (isUniqueViolation(error)) {
       return fail('An employee with that email address already exists.')
@@ -112,6 +114,20 @@ async function updateEmployeeInner(
     }
     if (actor.id === employeeId && !parsed.data.isActive) {
       return fail('You cannot deactivate your own account.')
+    }
+
+    // The type is a label by now, so a retired one may stay but not be newly
+    // chosen. Changing it touches no leave policy.
+    if (parsed.data.employeeTypeId && parsed.data.employeeTypeId !== before.employeeTypeId) {
+      const type = await db.employeeType.findUnique({
+        where: { id: parsed.data.employeeTypeId },
+        select: { isActive: true },
+      })
+      if (!type?.isActive) {
+        return fail('Please correct the errors below.', {
+          employeeTypeId: ['Choose an active employee type, or none.'],
+        })
+      }
     }
 
     // Saving the record is the review: whatever the directory could not

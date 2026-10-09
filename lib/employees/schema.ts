@@ -45,6 +45,9 @@ export const employeeInput = z
     departmentId: optionalCuid,
     /// Without one, nothing accrues per pay period and no timesheet is made.
     payScheduleId: optionalCuid,
+    /// On a new employee, the type whose policies they start on. Afterwards
+    /// a label only — changing it assigns and removes nothing.
+    employeeTypeId: optionalCuid,
     standardMinutesPerDay: z.coerce
       .number()
       .int('Enter a whole number of minutes.')

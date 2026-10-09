@@ -215,6 +215,12 @@ model Employee {
   payScheduleId String?
   paySchedule   PaySchedule? @relation(fields: [payScheduleId], references: [id], onDelete: SetNull)
 
+  /// The employee type they were created from, kept as a label. It filled in
+  /// their employment type and leave policies once, at creation; changing it
+  /// later, or editing the type, changes neither.
+  employeeTypeId String?
+  employeeType   EmployeeType? @relation(fields: [employeeTypeId], references: [id], onDelete: SetNull)
+
   approvalChain      ApprovalChainStep[]      @relation("ChainOwner")
   approverFor        ApprovalChainStep[]      @relation("ChainApprover")
   auditLogs          AuditLog[]
@@ -240,7 +246,56 @@ model Employee {
   @@index([isActive])
   @@index([departmentId])
   @@index([payScheduleId])
+  @@index([employeeTypeId])
   @@map("employees")
+}
+
+/// A starting profile for new employees — Pastor, Director, Associate, or
+/// whatever the organization calls its kinds of staff. Names are an
+/// administrator's, never code's. A pre-fill template only: it sets a new
+/// employee's employment type and leave policies when they are created, and
+/// nothing afterwards. See docs/SPEC.md.
+model EmployeeType {
+  id   String @id @default(cuid())
+  name String @unique
+
+  /// What the new-employee form starts the employment type at.
+  employmentType EmploymentType
+
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  policies  EmployeeTypePolicy[]
+  employees Employee[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("employee_types")
+}
+
+/// The policy an employee type starts a new hire on, at most one per leave
+/// type. A leave type with no row (comp time, say) is left unassigned. That
+/// the policy belongs to `leaveTypeId` is checked in the service layer.
+model EmployeeTypePolicy {
+  id String @id @default(cuid())
+
+  employeeTypeId String
+  employeeType   EmployeeType @relation(fields: [employeeTypeId], references: [id], onDelete: Cascade)
+
+  leaveTypeId String
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+
+  leavePolicyId String
+  leavePolicy   LeavePolicy @relation(fields: [leavePolicyId], references: [id], onDelete: Restrict)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([employeeTypeId, leaveTypeId])
+  @@index([leaveTypeId])
+  @@index([leavePolicyId])
+  @@map("employee_type_policies")
 }
 
 // ---------------------------------------------------------------------------
@@ -353,7 +408,8 @@ model LeaveType {
   ledgerEntries    LedgerEntry[]
   leaveRequests    LeaveRequest[]
   timeEntries      TimeEntry[]
-  compFor          OrgSettings[]     @relation("CompLeaveType")
+  compFor          OrgSettings[]        @relation("CompLeaveType")
+  typeDefaults     EmployeeTypePolicy[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -385,7 +441,8 @@ model LeavePolicy {
 
   isActive Boolean @default(true)
 
-  assignments EmployeeLeavePolicy[]
+  assignments  EmployeeLeavePolicy[]
+  typeDefaults EmployeeTypePolicy[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

@@ -26,6 +26,7 @@ export default async function EmployeesPage() {
         },
       },
       department: { select: { name: true } },
+      employeeType: { select: { name: true } },
     },
   })
 
@@ -52,6 +53,7 @@ export default async function EmployeesPage() {
               <th className="px-4 py-3 font-medium">Name</th>
               <th className="px-4 py-3 font-medium">Department</th>
               <th className="px-4 py-3 font-medium">Type</th>
+              <th className="px-4 py-3 font-medium">Pay basis</th>
               <th className="px-4 py-3 font-medium">Role</th>
               <th className="px-4 py-3 font-medium">Status</th>
             </tr>
@@ -69,6 +71,7 @@ export default async function EmployeesPage() {
                   <div className="text-xs text-muted">{e.email}</div>
                 </td>
                 <td className="px-4 py-3 text-muted">{e.department?.name ?? '—'}</td>
+                <td className="px-4 py-3 text-muted">{e.employeeType?.name ?? '—'}</td>
                 <td className="px-4 py-3 text-muted">
                   {e.employmentType === 'HOURLY' ? 'Hourly' : 'Salaried'}
                 </td>

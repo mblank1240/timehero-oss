@@ -470,3 +470,119 @@ export function CarryoverWindowFields({
     </>
   )
 }
+
+export const EMPLOYMENT_TYPE_LABELS: Record<string, string> = {
+  HOURLY: 'Hourly',
+  SALARIED_EXEMPT: 'Salaried (exempt)',
+}
+
+export function EmployeeTypeFields({
+  leaveTypes,
+  defaults,
+}: {
+  /** Each leave type with the policies that may be chosen for it. */
+  leaveTypes: {
+    id: string
+    name: string
+    accruableBy: string
+    policies: { id: string; name: string; isActive: boolean }[]
+  }[]
+  defaults?: {
+    name: string
+    employmentType: string
+    sortOrder: number
+    isActive: boolean
+    /** Leave type id to the chosen policy's id. */
+    policies: Record<string, string>
+  }
+}) {
+  return (
+    <>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <Field label="Name" name="name" hint="What your organization calls this kind of staff.">
+          <input id="name" name="name" required defaultValue={defaults?.name} className="th-input" />
+        </Field>
+
+        <Field
+          label="Employment type"
+          name="employmentType"
+          hint="What the new-employee form starts at. It can still be changed there."
+        >
+          <select
+            id="employmentType"
+            name="employmentType"
+            defaultValue={defaults?.employmentType ?? 'SALARIED_EXEMPT'}
+            className="th-input"
+          >
+            {Object.entries(EMPLOYMENT_TYPE_LABELS).map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+
+      <fieldset className="space-y-4 rounded-lg border border-border p-4">
+        <legend className="px-1 text-xs font-semibold uppercase tracking-wide text-muted">
+          Leave policies for new employees
+        </legend>
+        {leaveTypes.length === 0 && (
+          <p className="text-sm text-muted">No leave types yet.</p>
+        )}
+        <div className="grid gap-5 sm:grid-cols-2">
+          {leaveTypes.map((type) => {
+            const field = `policy.${type.id}`
+            return (
+              <Field
+                key={type.id}
+                label={type.name}
+                name={field}
+                hint={
+                  type.accruableBy === 'ALL'
+                    ? undefined
+                    : `${ACCRUABLE_LABELS[type.accruableBy]}.`
+                }
+              >
+                <select
+                  id={field}
+                  name={field}
+                  defaultValue={defaults?.policies[type.id] ?? ''}
+                  className="th-input"
+                >
+                  <option value="">— None —</option>
+                  {type.policies.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                      {p.isActive ? '' : ' (retired)'}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )
+          })}
+        </div>
+      </fieldset>
+
+      <Field label="Sort order" name="sortOrder">
+        <input
+          id="sortOrder"
+          name="sortOrder"
+          type="number"
+          min={0}
+          max={999}
+          defaultValue={defaults?.sortOrder ?? 0}
+          required
+          className="th-input"
+        />
+      </Field>
+
+      <Checkbox
+        name="isActive"
+        label="Active"
+        defaultChecked={defaults?.isActive ?? true}
+        hint="An inactive type is no longer offered for new employees."
+      />
+    </>
+  )
+}

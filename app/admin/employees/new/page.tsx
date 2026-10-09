@@ -7,7 +7,7 @@ export const metadata = { title: 'Add employee · TimeHero' }
 
 export default async function NewEmployeePage() {
   await requireAdmin()
-  const [departments, paySchedules] = await Promise.all([
+  const [departments, paySchedules, employeeTypes] = await Promise.all([
     db.department.findMany({
       orderBy: { name: 'asc' },
       select: { id: true, name: true },
@@ -16,6 +16,11 @@ export default async function NewEmployeePage() {
       where: { isActive: true },
       orderBy: [{ isDefault: 'desc' }, { name: 'asc' }],
       select: { id: true, name: true, isDefault: true },
+    }),
+    db.employeeType.findMany({
+      where: { isActive: true },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      select: { id: true, name: true, employmentType: true },
     }),
   ])
 
@@ -26,6 +31,8 @@ export default async function NewEmployeePage() {
         action={createEmployee}
         departments={departments}
         paySchedules={paySchedules}
+        employeeTypes={employeeTypes}
+        isNew
         defaults={{
           payScheduleId: paySchedules.find((s) => s.isDefault)?.id ?? '',
         }}

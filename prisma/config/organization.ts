@@ -11,11 +11,13 @@ import {
   FIRST_YEAR_GRANTS,
   PAY_SCHEDULE_TYPES,
 } from '../../lib/config/schema'
+import { accruableBy } from '../../lib/employees/assignments'
+import { EMPLOYMENT_TYPES } from '../../lib/employees/schema'
 
 /**
  * An organization's starting configuration: org settings, departments, the
- * pay calendar, holidays, leave types, policies, rollover rules and carryover
- * windows. `prisma/seed.ts` loads one of these files; nothing in code holds an
+ * pay calendar, holidays, leave types, policies, rollover rules, carryover
+ * windows and employee types. `prisma/seed.ts` loads one of these files; nothing in code holds an
  * organization's figures (rule 1 in CLAUDE.md).
  *
  * `SEED_CONFIG` names the file. Without it the seed uses `example.json`, a
@@ -101,6 +103,19 @@ export const organizationConfig = z
         capBasis: z.enum(CAP_BASES),
       }),
     ),
+    /**
+     * Starting profiles for new employees. `policies` maps a leave type code
+     * to the name of one of its policies; a leave type left out gets none.
+     */
+    employeeTypes: z
+      .array(
+        z.object({
+          name: z.string().min(1),
+          employmentType: z.enum(EMPLOYMENT_TYPES),
+          policies: z.record(z.string().min(1), z.string().min(1)).default({}),
+        }),
+      )
+      .default([]),
   })
   .superRefine((config, ctx) => {
     const codes = new Set(config.leaveTypes.map((type) => type.code))
@@ -116,6 +131,33 @@ export const organizationConfig = z
         }
       })
     }
+    const names = new Set<string>()
+    config.employeeTypes.forEach((type, index) => {
+      if (names.has(type.name.toLowerCase())) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['employeeTypes', index, 'name'],
+          message: `Two employee types are called ${type.name}.`,
+        })
+      }
+      names.add(type.name.toLowerCase())
+      for (const [code, policyName] of Object.entries(type.policies)) {
+        const path = ['employeeTypes', index, 'policies', code]
+        const leaveType = config.leaveTypes.find((t) => t.code === code)
+        if (!leaveType) {
+          ctx.addIssue({ code: 'custom', path, message: `No leave type with code ${code}.` })
+        } else if (!config.policies.some((p) => p.leaveType === code && p.name === policyName)) {
+          ctx.addIssue({ code: 'custom', path, message: `No ${code} policy is called ${policyName}.` })
+        } else if (!accruableBy(leaveType.accruableBy, type.employmentType)) {
+          // Rule 4: a comp policy never becomes an hourly hire's default.
+          ctx.addIssue({
+            code: 'custom',
+            path,
+            message: `${code} is ${leaveType.accruableBy}, so a ${type.employmentType} type cannot default to it.`,
+          })
+        }
+      }
+    })
     const banks = config.leaveTypes.filter((type) => type.bankOvertime)
     if (banks.length > 1) {
       ctx.addIssue({ code: 'custom', path: ['leaveTypes'], message: 'Only one leave type can bank overtime.' })

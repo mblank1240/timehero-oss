@@ -15,6 +15,7 @@ const SECTIONS = [
   { href: '/admin/holidays', label: 'Holidays' },
   { href: '/admin/leave-types', label: 'Leave types' },
   { href: '/admin/leave-policies', label: 'Leave policies' },
+  { href: '/admin/employee-types', label: 'Employee types' },
   { href: '/admin/rollover', label: 'Rollover' },
   { href: '/admin/ledger', label: 'Ledger' },
   { href: '/admin/directory', label: 'Directory' },

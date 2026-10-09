@@ -25,6 +25,7 @@ const CONFIG_ROUTES = [
   '/admin/holidays',
   '/admin/leave-types',
   '/admin/leave-policies',
+  '/admin/employee-types',
   '/admin/rollover',
 ]
 

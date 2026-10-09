@@ -23,6 +23,9 @@ import { benefitYearContaining } from '@/lib/accrual/dates'
 import { planOpeningBalance } from '@/lib/accrual/opening'
 import { db } from '@/lib/db'
 import { parseDuration } from '@/lib/duration'
+import { describeSkipped, planTypeAssignments } from '@/lib/employee-types/plan'
+import { typePolicies } from '@/lib/employee-types/service'
+import type { EmploymentType } from '@/lib/employees/assignments'
 import { entriesFor, writeEntries } from '@/lib/ledger/entries'
 import { accruableBy, subjectsForAccrual } from '@/lib/ledger/policies'
 
@@ -60,6 +63,8 @@ export type ImportReport = {
    * wrong for everyone else.
    */
   missingBalances: { email: string; leaveType: string }[]
+  /** A type's default policies a row's employee could not be put on, and why. */
+  policiesSkipped: { email: string; message: string }[]
 }
 
 /** Thrown to roll the transaction back; carries the report out. */
@@ -82,6 +87,7 @@ export async function runImport(
     chainsSet: 0,
     balances: [],
     missingBalances: [],
+    policiesSkipped: [],
   }
 
   try {
@@ -115,7 +121,7 @@ async function importEmployees(
   const fail = (line: number, message: string) =>
     report.errors.push({ file: 'employees', line, message })
 
-  const [schedules, policies] = await Promise.all([
+  const [schedules, policies, employeeTypes] = await Promise.all([
     tx.paySchedule.findMany({ select: { id: true, name: true, isDefault: true } }),
     tx.leavePolicy.findMany({
       select: {
@@ -124,6 +130,9 @@ async function importEmployees(
         isActive: true,
         leaveType: { select: { code: true, name: true, accruableBy: true } },
       },
+    }),
+    tx.employeeType.findMany({
+      select: { id: true, name: true, isActive: true, employmentType: true },
     }),
   ])
   const defaultSchedule = schedules.find((s) => s.isDefault) ?? null
@@ -134,7 +143,16 @@ async function importEmployees(
     ]),
   )
 
-  const created = new Map<string, { id: string; row: EmployeeRow }>()
+  const created = new Map<
+    string,
+    {
+      id: string
+      row: EmployeeRow
+      employmentType: EmploymentType
+      employeeType: string | null
+      fromType: string[]
+    }
+  >()
 
   for (const row of rows) {
     const existing = await tx.employee.findUnique({ where: { email: row.email }, select: { id: true } })
@@ -153,6 +171,23 @@ async function importEmployees(
       payScheduleId = named.id
     }
 
+    let employeeType: (typeof employeeTypes)[number] | null = null
+    if (row.employeeType) {
+      employeeType =
+        employeeTypes.find((t) => t.name.toLowerCase() === row.employeeType!.toLowerCase()) ?? null
+      if (!employeeType) {
+        fail(row.line, `type: no employee type is called "${row.employeeType}".`)
+        continue
+      }
+      if (!employeeType.isActive) {
+        fail(row.line, `type: ${employeeType.name} is inactive.`)
+        continue
+      }
+    }
+    // The row's own employment type wins; the type's fills a blank, which
+    // `parseEmployeeRows` allows only on a row naming a type.
+    const employmentType = row.employmentType ?? employeeType!.employmentType
+
     const assignments: { leavePolicyId: string; annualMinutesOverride: number | null }[] = []
     for (const ref of row.policies) {
       const policy = policies.find(
@@ -170,11 +205,30 @@ async function importEmployees(
       }
       // Rule 4: comp time, and anything else restricted, never reaches the
       // wrong employment type — not even through an import.
-      if (!accruableBy(policy.leaveType.accruableBy, row.employmentType)) {
+      if (!accruableBy(policy.leaveType.accruableBy, employmentType)) {
         fail(row.line, `policies: ${policy.leaveType.name} is not available to this employment type.`)
         continue
       }
       assignments.push({ leavePolicyId: policy.id, annualMinutesOverride: ref.annualMinutesOverride })
+    }
+
+    // A type's policies apply only to a row that lists none: an explicit
+    // `policies` column is the whole of what the row means.
+    const fromType: string[] = []
+    if (employeeType && row.policies.length === 0) {
+      const plan = planTypeAssignments({
+        policies: await typePolicies(employeeType.id, tx),
+        employmentType,
+        hireDate: row.hireDate,
+      })
+      for (const a of plan.assignments) {
+        assignments.push({ leavePolicyId: a.leavePolicyId, annualMinutesOverride: null })
+        const policy = policies.find((p) => p.id === a.leavePolicyId)!
+        fromType.push(`${policy.leaveType.code}:${policy.name}`)
+      }
+      for (const skipped of plan.skipped) {
+        report.policiesSkipped.push({ email: row.email, message: describeSkipped(skipped) })
+      }
     }
 
     let departmentId: string | null = null
@@ -205,7 +259,8 @@ async function importEmployees(
         firstName: row.firstName,
         lastName: row.lastName,
         role: row.role,
-        employmentType: row.employmentType,
+        employmentType,
+        employeeTypeId: employeeType?.id ?? null,
         hireDate: row.hireDate,
         terminationDate: row.terminationDate,
         isActive: row.terminationDate === null || row.terminationDate >= opts.asOf,
@@ -220,13 +275,19 @@ async function importEmployees(
       },
       select: { id: true },
     })
-    created.set(row.email, { id: employee.id, row })
+    created.set(row.email, {
+      id: employee.id,
+      row,
+      employmentType,
+      employeeType: employeeType?.name ?? null,
+      fromType,
+    })
     report.employeesCreated.push(row.email)
   }
 
   // Chains second, so an approver may appear later in the file than the
   // people who report to them.
-  for (const { id, row } of created.values()) {
+  for (const { id, row, employmentType, employeeType, fromType } of created.values()) {
     const approverIds: string[] = []
     for (const email of row.approverEmails) {
       const approver = await tx.employee.findUnique({
@@ -259,10 +320,11 @@ async function importEmployees(
           firstName: row.firstName,
           lastName: row.lastName,
           role: row.role,
-          employmentType: row.employmentType,
+          employmentType,
+          employeeType,
           hireDate: iso(row.hireDate),
           terminationDate: row.terminationDate ? iso(row.terminationDate) : null,
-          policies: row.policies.map((p) => `${p.leaveTypeCode}:${p.policyName}`),
+          policies: [...row.policies.map((p) => `${p.leaveTypeCode}:${p.policyName}`), ...fromType],
           approvers: row.approverEmails,
         },
         reason: `Imported from ${opts.source}`,

@@ -11,6 +11,8 @@ import {
   updateLeavePolicyAssignment,
 } from '@/lib/config/actions'
 import { db } from '@/lib/db'
+import { describeSkipped, planTypeAssignments } from '@/lib/employee-types/plan'
+import { typePolicies } from '@/lib/employee-types/service'
 import { unlinkIdentity, updateEmployee } from '@/lib/employees/actions'
 import { formatLeaveDate } from '@/lib/requests/format'
 
@@ -23,11 +25,15 @@ function toDateInput(d: Date | null): string {
   return d ? d.toISOString().slice(0, 10) : ''
 }
 
-export default async function EditEmployeePage({ params }: PageProps<'/admin/employees/[id]'>) {
+export default async function EditEmployeePage({
+  params,
+  searchParams,
+}: PageProps<'/admin/employees/[id]'>) {
   const admin = await requireAdmin()
   const { id } = await params
+  const { created } = await searchParams
 
-  const [employee, departments, paySchedules, policies, candidates] = await Promise.all([
+  const [employee, departments, paySchedules, policies, candidates, employeeTypes] = await Promise.all([
     db.employee.findUnique({
       where: { id },
       include: {
@@ -36,6 +42,7 @@ export default async function EditEmployeePage({ params }: PageProps<'/admin/emp
           select: { approverId: true },
         },
         identities: { orderBy: { createdAt: 'asc' } },
+        employeeType: { select: { id: true, name: true } },
         leavePolicies: {
           orderBy: { effectiveFrom: 'desc' },
           include: {
@@ -65,9 +72,26 @@ export default async function EditEmployeePage({ params }: PageProps<'/admin/emp
       orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
       select: { id: true, firstName: true, lastName: true },
     }),
+    db.employeeType.findMany({
+      // The employee's own type stays selectable after it is retired.
+      where: { OR: [{ isActive: true }, { employees: { some: { id } } }] },
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      select: { id: true, name: true, employmentType: true },
+    }),
   ])
 
   if (!employee) notFound()
+
+  // Straight after creation from a type: what it could not assign, worked out
+  // again from the type as it stands — the same plan the creation followed.
+  const skipped =
+    created && employee.employeeType
+      ? planTypeAssignments({
+          policies: await typePolicies(employee.employeeType.id),
+          employmentType: employee.employmentType,
+          hireDate: employee.hireDate,
+        }).skipped
+      : []
 
   const updateThisEmployee = updateEmployee.bind(null, employee.id)
 
@@ -84,6 +108,21 @@ export default async function EditEmployeePage({ params }: PageProps<'/admin/emp
             </Link>
           )}
         </div>
+        {created && (
+          <div role="status" className="th-card mt-3 space-y-1 p-3 text-sm">
+            <p>
+              <span className="font-medium">Employee created.</span>{' '}
+              {employee.employeeType
+                ? `Their leave policies below come from the ${employee.employeeType.name} type, from their hire date.`
+                : 'Assign their leave policies below.'}
+            </p>
+            {skipped.map((s) => (
+              <p key={s.leavePolicyId} className="text-danger">
+                {describeSkipped(s)}
+              </p>
+            ))}
+          </div>
+        )}
         {employee.needsReview && (
           <p role="status" className="th-card mt-3 border-accent/40 p-3 text-sm">
             <span className="font-medium">Needs review.</span> This person came from the
@@ -98,6 +137,7 @@ export default async function EditEmployeePage({ params }: PageProps<'/admin/emp
         action={updateThisEmployee}
         departments={departments}
         paySchedules={paySchedules}
+        employeeTypes={employeeTypes}
         submitLabel="Save changes"
         defaults={{
           email: employee.email,
@@ -109,6 +149,7 @@ export default async function EditEmployeePage({ params }: PageProps<'/admin/emp
           terminationDate: toDateInput(employee.terminationDate),
           departmentId: employee.departmentId ?? '',
           payScheduleId: employee.payScheduleId ?? '',
+          employeeTypeId: employee.employeeTypeId ?? '',
           standardMinutesPerDay: employee.standardMinutesPerDay,
           isActive: employee.isActive,
         }}
