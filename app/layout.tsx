@@ -3,8 +3,9 @@ import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 
 import { SignOutButton } from "@/components/sign-out-button";
-import { canReadReports, getCurrentUser } from "@/lib/authz";
+import { getCurrentUser } from "@/lib/authz";
 import { unreadCount } from "@/lib/notifications/queries";
+import { ADMIN_SECTIONS, REPORT_SECTIONS, sectionsFor } from "@/lib/permissions";
 import { inboxCount } from "@/lib/requests/queries";
 
 import "./globals.css";
@@ -28,6 +29,8 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   const user = await getCurrentUser();
   const waiting = user ? await inboxCount(user) : 0;
   const unread = user ? await unreadCount(user.id) : 0;
+  // Administration opens on the first section this person may use.
+  const adminHome = user ? sectionsFor(user, ADMIN_SECTIONS)[0]?.href : undefined;
 
   return (
     <html
@@ -73,15 +76,15 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
               </>
             )}
 
-            {user && canReadReports(user) && (
+            {user && sectionsFor(user, REPORT_SECTIONS).length > 0 && (
               <Link href="/reports" className="text-sm text-muted hover:text-foreground">
                 Reports
               </Link>
             )}
 
-            {user?.role === "ADMIN" && (
+            {adminHome && (
               <Link
-                href="/admin/employees"
+                href={adminHome}
                 className="text-sm text-muted hover:text-foreground"
               >
                 Administration

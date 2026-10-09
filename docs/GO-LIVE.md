@@ -85,7 +85,7 @@ rows can be added to the file and run again.
 |---|---|---|
 | `email` | yes | Their sign-in address |
 | `first_name`, `last_name` | yes | |
-| `role` | | `EMPLOYEE` (default), `ADMIN` or `FINANCE`. Make yourself `ADMIN` |
+| `role` | | An access role's name (any case), from Administration → Access; blank or `EMPLOYEE` for none. `ADMIN` means the built-in Administrator. Make yourself `ADMIN` |
 | `employment_type` | yes | `HOURLY` or `SALARIED_EXEMPT` (`exempt` is accepted). Comp time is exempt staff only. May be blank on a row with a `type`, which then supplies it |
 | `type` | | An employee type's name (any case), from Administration → Employee types. On a row with no `policies` they are put on the type's policies; a policy their employment type cannot hold is skipped and listed in the report |
 | `hire_date` | yes | `YYYY-MM-DD`. Drives the waiting period |

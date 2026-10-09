@@ -5,16 +5,34 @@ Written for the church TimeHero was first built for. Where it says "our" or
 every one of them is a setting. The example configuration TimeHero ships with
 (`docs/CONFIGURATION.md`) uses its own figures.
 
-## Roles
+## Roles and permissions
 
-| Role | Can |
+Every employee can view their own balances and history, request leave, log overtime (if exempt) and submit timesheets (if hourly). Anyone in someone's approval chain acts on what is routed to them; approver is not a role.
+
+Everything beyond that is a **permission**, and an administrator gives permissions out in named **access roles** (Administration → Access). An employee holds one access role or none.
+
+| Permission | Lets them |
 |---|---|
-| **Employee** | View own balances & history, request leave, log overtime (if exempt), submit timesheets (if hourly) |
-| **Approver** | Everything above, plus act on requests routed to them. Not a separate role — any employee can appear in someone's approval chain. |
-| **Finance** | Everything an employee can, plus read every timesheet and download the payroll exports. Changes nothing: no settings, no unlocks, no overrides. |
-| **Admin** | All of the above org-wide: manage employees, policies, accruals, approval chains, pay schedules, rollover caps; post manual ledger adjustments; override, deny, skip or reroute any approval; enter leave for anyone (through their chain or recorded as approved), amend a pending or approved request, cancel approved overtime, fill in and submit anyone's timesheet — each with a reason, never on their own records |
+| Manage access | Create and edit access roles and give them to people. Holders can grant anything, so give it sparingly |
+| Manage employees | Employees, departments, employee types, approval chains, leave-policy assignments |
+| Manage leave policies | Leave types, policies, rollover, pay schedules, holidays |
+| Manage directory | Connect Microsoft 365, run the sync |
+| Manage scheduled jobs | See job runs, run a job for a missed date |
+| Manage settings | Organization and notification settings |
+| View everyone's time records | Anyone's leave requests, overtime, timesheets and balances |
+| Act on everyone's time records | Override, deny, skip or reroute any approval; act on an empty chain; enter leave for anyone, amend a pending or approved request, cancel approved overtime, fill in, submit and unlock anyone's timesheet — each with a reason, never on their own records. Includes viewing them |
+| Ledger adjustments | Read anyone's ledger and post adjustments, never to their own |
+| Each report | Timesheets, Balances, Leave taken, Forfeitures, Employee ledger — read and export that one |
 
-Role lives on the Employee record. Entra group sync is a later option, not v1.
+Two roles exist from the start. **Administrator** holds every permission, including any a later release adds, and cannot be edited or deleted. **Finance** holds the five reports and changes nothing; it is an ordinary role an administrator may change.
+
+Three rules keep this safe:
+
+- **Nobody changes their own access.** Another holder of "Manage access" has to.
+- **Nobody edits someone who holds a permission they lack.** Otherwise whoever manages employees could change an administrator's address to their own mailbox and sign in as them.
+- **Someone who can sign in always holds "Manage access".** Any change that would leave nobody — editing a role, reassigning, deactivating — is refused.
+
+Permissions govern the application. Whoever owns the Azure subscription or the database can read the data directly; separating those duties is outside TimeHero. Entra group sync is a later option, not v1.
 
 ## Authentication
 
@@ -123,15 +141,15 @@ Comp time's rollover behavior is a `RolloverRule` plus any `CarryoverWindow` row
 
 ## Approval chains
 
-Each employee has an **ordered** chain of approvers (step 1, 2, 3…). Admins edit it per employee; a default chain can be set per department.
+Each employee has an **ordered** chain of approvers (step 1, 2, 3…). Admins edit it per employee. With a Microsoft 365 directory connected, the sync starts an empty chain with the person's manager in Entra, and flags the employee for review when that manager changes later; it never rewrites a chain (Administration → Directory turns this off).
 
 Flow: request submitted → step 1 notified → approves → step 2 notified → … → last step approves → request is `APPROVED` and `USAGE` entries are written, one per day.
 
 - Any step denying ends the request as `DENIED`. Later steps are never notified.
 - An employee may cancel while `PENDING`. Cancelling an already-approved future request writes `USAGE_REVERSAL` entries; the originals stay.
-- Admins can approve any step, skip a step, or reroute — each action audit-logged with a required reason.
+- Those who may act on everyone's time records can approve any step, skip a step, or reroute — each action audit-logged with a required reason.
 - An approver appearing in their own chain is skipped automatically.
-- Empty chain → routes to all admins; any one of them can approve.
+- Empty chain → routes to everyone who may act on everyone's time records; any one of them can approve.
 
 Balance is checked at submission and re-checked at final approval. Insufficient balance blocks submission unless the type allows negative balances. The check looks at every date from the request's first day onward, not only the days requested: time can leave the account after the day it is spent from. A request for 30 March against comp expiring 31 March, still pending when the expiry job forfeits that comp on 1 April, would otherwise be approved on 2 April and spend the same time twice — so it is refused, and the approver denies it or has the balance corrected.
 

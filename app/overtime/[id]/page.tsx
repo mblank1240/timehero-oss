@@ -19,6 +19,7 @@ import { canViewOvertime, overtimeDetail } from '@/lib/overtime/queries'
 import { compPlanFor } from '@/lib/overtime/service'
 import { currentStep, mayDecide } from '@/lib/requests/chain'
 import { STEP_STATUS_LABEL, formatLeaveDate, formatTimestamp } from '@/lib/requests/format'
+import { can } from '@/lib/permissions'
 
 export const metadata = { title: 'Overtime · TimeHero' }
 
@@ -51,13 +52,13 @@ export default async function OvertimeLogPage({ params }: PageProps<'/overtime/[
   const show = (minutes: number) => formatDuration(minutes, { unit: org.displayUnit, minutesPerDay })
 
   const own = user.id === log.employeeId
-  const isAdmin = user.role === 'ADMIN'
+  const actsForOthers = can(user, 'MANAGE_TIME_RECORDS')
   const current = log.status === 'PENDING' ? currentStep(log.steps) : null
   const canDecide = current !== null && mayDecide(current, user, log.employeeId)
-  const canOverride = current !== null && isAdmin && !own && !canDecide
+  const canOverride = current !== null && actsForOthers && !own && !canDecide
   const cancellable =
-    (log.status === 'PENDING' && (own || isAdmin)) ||
-    (log.status === 'APPROVED' && isAdmin && !own)
+    (log.status === 'PENDING' && (own || actsForOthers)) ||
+    (log.status === 'APPROVED' && actsForOthers && !own)
 
   // What approving now would bank, so nobody approves a closed-year log
   // believing it banks the full amount.

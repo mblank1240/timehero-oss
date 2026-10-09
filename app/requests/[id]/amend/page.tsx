@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 
 import { LeaveRequestForm } from '@/components/leave-request-form'
-import { requireAdmin } from '@/lib/authz'
+import { requirePermission } from '@/lib/authz'
 import { db } from '@/lib/db'
 import { leaveFormProps } from '@/lib/requests/form-props'
 
@@ -17,7 +17,7 @@ const MS_PER_DAY = 86_400_000
  */
 export default async function AmendRequestPage({ params }: PageProps<'/requests/[id]/amend'>) {
   const { id } = await params
-  const admin = await requireAdmin()
+  const admin = await requirePermission('MANAGE_TIME_RECORDS')
 
   const request = await db.leaveRequest.findUnique({
     where: { id },

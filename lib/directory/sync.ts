@@ -10,6 +10,7 @@ import { writeAudit } from '@/lib/audit'
 import { db } from '@/lib/db'
 import type { JobOutcome } from '@/lib/jobs/runner'
 
+import { planManagerChains } from './managers'
 import { addressOf, employeeFromDirectoryUser, planDirectorySync, type DirectoryUser } from './plan'
 import { directoryFor, type Directory } from './sources'
 
@@ -34,6 +35,7 @@ export async function runDirectorySync(
       tenantId: true,
       domains: true,
       autoProvision: true,
+      chainsFromManager: true,
     },
   })
   if (connections.length === 0) {
@@ -98,6 +100,7 @@ async function syncOne(
     tenantId: string
     domains: string[]
     autoProvision: boolean
+    chainsFromManager: boolean
   },
   users: DirectoryUser[],
   asOf: Date,
@@ -109,7 +112,12 @@ async function syncOne(
       email: true,
       isActive: true,
       identities: {
-        where: { provider: connection.provider },
+        // This tenant's accounts only: whether one is missing is a question
+        // only this directory can answer.
+        where: {
+          provider: connection.provider,
+          OR: [{ tenant: connection.tenantId }, { tenant: null }],
+        },
         select: { subject: true },
       },
     },
@@ -126,6 +134,7 @@ async function syncOne(
     autoProvision: connection.autoProvision,
   })
 
+  let managers = { chainsPrefilled: 0, flaggedManagerChanged: 0 }
   await db.$transaction(async (tx) => {
     for (const { employeeId, user } of plan.link) {
       await tx.identity.create({
@@ -154,6 +163,12 @@ async function syncOne(
         tx,
       )
     }
+    // Before the refresh below records this sync's managers: the change from
+    // the last one is what flags a chain.
+    if (connection.chainsFromManager) {
+      managers = await applyManagerChains(tx, connection.provider, users, actorId)
+    }
+
     for (const r of plan.refresh) {
       await tx.identity.update({
         where: {
@@ -162,8 +177,51 @@ async function syncOne(
             subject: r.subject,
           },
         },
-        data: { directoryAccountEnabled: r.enabled, email: r.email },
+        data: {
+          directoryAccountEnabled: r.enabled,
+          email: r.email,
+          directoryManagerSubject: r.managerSubject,
+        },
       })
+    }
+    // Audited once, on the sync that first finds the account gone; the flag is
+    // set again each sync until someone acts, as for a disabled account.
+    const newlyMissing = new Set(
+      (
+        await tx.identity.findMany({
+          where: {
+            provider: connection.provider,
+            subject: { in: plan.missing },
+            // Null too: an account linked at sign-in and gone before a sync saw it.
+            OR: [{ directoryAccountEnabled: true }, { directoryAccountEnabled: null }],
+          },
+          select: { employeeId: true },
+        })
+      ).map((i) => i.employeeId),
+    )
+    if (plan.missing.length > 0) {
+      // Recorded as disabled, which is what stops every way of signing in.
+      await tx.identity.updateMany({
+        where: { provider: connection.provider, subject: { in: plan.missing } },
+        data: { directoryAccountEnabled: false },
+      })
+    }
+    if (plan.flagMissing.length > 0) {
+      await tx.employee.updateMany({
+        where: { id: { in: plan.flagMissing } },
+        data: { needsReview: true },
+      })
+      for (const employeeId of plan.flagMissing.filter((id) => newlyMissing.has(id))) {
+        await writeAudit(
+          {
+            actorId,
+            action: 'employee.flagDirectoryMissing',
+            entityType: 'Employee',
+            entityId: employeeId,
+          },
+          tx,
+        )
+      }
     }
     if (plan.flagDisabled.length > 0) {
       await tx.employee.updateMany({
@@ -177,6 +235,9 @@ async function syncOne(
     created: plan.create.length,
     linked: plan.link.length,
     flaggedDisabled: plan.flagDisabled.length,
+    flaggedMissing: plan.flagMissing.length,
+    missingWithheld: plan.missingWithheld,
+    ...managers,
     alreadyBound: plan.refresh.length,
     skipped: plan.skipped,
   }
@@ -202,7 +263,87 @@ function identityData(
     tenant: connection.tenantId,
     email: addressOf(user),
     directoryAccountEnabled: user.accountEnabled,
+    directoryManagerSubject: user.managerId,
   }
+}
+
+/**
+ * Starts empty approval chains with the directory manager and flags employees
+ * whose manager has changed (`planManagerChains`). Reads the identities as
+ * they stand inside the sync's transaction, so an employee and their manager
+ * created by this same sync are matched.
+ */
+async function applyManagerChains(
+  tx: Prisma.TransactionClient,
+  provider: Provider,
+  users: readonly DirectoryUser[],
+  actorId: string | null,
+) {
+  const listed = new Map(users.map((u) => [u.id, u]))
+  const bound = await tx.identity.findMany({
+    where: { provider },
+    select: {
+      subject: true,
+      directoryManagerSubject: true,
+      employee: {
+        select: {
+          id: true,
+          isActive: true,
+          approvalChain: { orderBy: { step: 'asc' }, select: { approverId: true } },
+        },
+      },
+    },
+  })
+
+  const plan = planManagerChains(
+    bound
+      .filter((b) => listed.has(b.subject))
+      .map((b) => ({
+        employeeId: b.employee.id,
+        isActive: b.employee.isActive,
+        managerSubject: listed.get(b.subject)!.managerId,
+        previousManagerSubject: b.directoryManagerSubject,
+        chain: b.employee.approvalChain.map((s) => s.approverId),
+      })),
+    new Map(bound.map((b) => [b.subject, { id: b.employee.id, isActive: b.employee.isActive }])),
+  )
+
+  let prefilled = 0
+  for (const p of plan.prefill) {
+    // A chain set by hand since the read above wins: its step 1 is taken.
+    const { count } = await tx.approvalChainStep.createMany({
+      data: [{ employeeId: p.employeeId, step: 1, approverId: p.approverId }],
+      skipDuplicates: true,
+    })
+    if (count === 0) continue
+    prefilled += 1
+    await writeAudit(
+      {
+        actorId,
+        action: 'approvalChain.fromDirectoryManager',
+        entityType: 'Employee',
+        entityId: p.employeeId,
+        before: [],
+        after: [{ step: 1, approverId: p.approverId }],
+      },
+      tx,
+    )
+  }
+  if (plan.flag.length > 0) {
+    await tx.employee.updateMany({ where: { id: { in: plan.flag } }, data: { needsReview: true } })
+    for (const employeeId of plan.flag) {
+      await writeAudit(
+        {
+          actorId,
+          action: 'employee.flagManagerChanged',
+          entityType: 'Employee',
+          entityId: employeeId,
+        },
+        tx,
+      )
+    }
+  }
+  return { chainsPrefilled: prefilled, flaggedManagerChanged: plan.flag.length }
 }
 
 /**

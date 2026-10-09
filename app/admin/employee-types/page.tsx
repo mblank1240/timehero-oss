@@ -2,14 +2,14 @@ import Link from 'next/link'
 
 import { EMPLOYMENT_TYPE_LABELS, EmployeeTypeFields } from '@/components/config-fields'
 import { ConfigForm, SubmitButton } from '@/components/form'
-import { requireAdmin } from '@/lib/authz'
+import { requirePermission } from '@/lib/authz'
 import { db } from '@/lib/db'
 import { saveEmployeeType } from '@/lib/employee-types/actions'
 
 export const metadata = { title: 'Employee types · TimeHero' }
 
 export default async function EmployeeTypesPage() {
-  await requireAdmin()
+  await requirePermission('MANAGE_EMPLOYEES')
   const [types, leaveTypes] = await Promise.all([
     db.employeeType.findMany({
       orderBy: [{ isActive: 'desc' }, { sortOrder: 'asc' }, { name: 'asc' }],

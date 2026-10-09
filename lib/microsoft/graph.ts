@@ -101,12 +101,22 @@ export type { DirectoryUser }
 const USER_FIELDS =
   'id,displayName,givenName,surname,mail,userPrincipalName,accountEnabled,userType,employeeHireDate'
 
+/** A user as Graph returns them, with the manager expanded to its id. */
+type GraphUser = Omit<DirectoryUser, 'managerId'> & { manager?: { id: string } | null }
+
+function fromGraph({ manager, ...user }: GraphUser): DirectoryUser {
+  return { ...user, managerId: manager?.id ?? null }
+}
+
+// The manager needs nothing beyond User.Read.All, which the sync already has.
+const EXPAND_MANAGER = '$expand=manager($select=id)'
+
 export async function listUsers(tenantId: string): Promise<DirectoryUser[]> {
   const users: DirectoryUser[] = []
-  let next: string | undefined = `/users?$select=${USER_FIELDS}&$top=999`
+  let next: string | undefined = `/users?$select=${USER_FIELDS}&${EXPAND_MANAGER}&$top=999`
   while (next) {
-    const page: { value: DirectoryUser[]; '@odata.nextLink'?: string } = await graph(tenantId, next)
-    users.push(...page.value)
+    const page: { value: GraphUser[]; '@odata.nextLink'?: string } = await graph(tenantId, next)
+    users.push(...page.value.map(fromGraph))
     next = page['@odata.nextLink']
   }
   return users
@@ -114,9 +124,11 @@ export async function listUsers(tenantId: string): Promise<DirectoryUser[]> {
 
 export async function getUser(tenantId: string, id: string): Promise<DirectoryUser | null> {
   try {
-    return await graph<DirectoryUser>(
-      tenantId,
-      `/users/${encodeURIComponent(id)}?$select=${USER_FIELDS}`,
+    return fromGraph(
+      await graph<GraphUser>(
+        tenantId,
+        `/users/${encodeURIComponent(id)}?$select=${USER_FIELDS}&${EXPAND_MANAGER}`,
+      ),
     )
   } catch (error) {
     if (error instanceof GraphError && error.status === 404) return null

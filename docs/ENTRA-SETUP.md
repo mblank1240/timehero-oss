@@ -38,8 +38,9 @@ flag is ever set in production, and there is no exemption — not even for tests
 > **API permissions — application, Microsoft Graph** (these need admin consent):
 >
 > - `User.Read.All` — read the staff directory, so active staff are imported
->   automatically and anyone signing in from our domains is matched to their
->   record. Read-only; nothing is written to the directory.
+>   automatically, anyone signing in from our domains is matched to their
+>   record, and each person's manager starts their approval chain. Read-only;
+>   nothing is written to the directory.
 > - `Mail.Send` — send notifications and sign-in links from the shared mailbox
 >   `time@<OUR-DOMAIN>`. Please **restrict it to that one mailbox** with an
 >   Exchange application access policy

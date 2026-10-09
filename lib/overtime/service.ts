@@ -30,6 +30,7 @@ import { applyDecision, currentStep, mayDecide, snapshotChain, type Actor } from
 import { RequestError } from '@/lib/requests/service'
 
 import { overtimeLogInput } from './schema'
+import { can } from '@/lib/permissions'
 
 type Tx = Prisma.TransactionClient
 type Client = Tx | typeof db
@@ -318,7 +319,7 @@ export async function decideOvertimeLog(
     if (!current) throw new RequestError('This overtime has already been decided.')
 
     if (override) {
-      if (actor.role !== 'ADMIN') {
+      if (!can(actor, 'MANAGE_TIME_RECORDS')) {
         throw new RequestError('Only an administrator can override a step.')
       }
       if (actor.id === log.employeeId) {
@@ -446,7 +447,7 @@ export async function rerouteOvertimeLog(
   actor: Actor,
   args: { logId: string; approverId: string; reason: string },
 ): Promise<void> {
-  if (actor.role !== 'ADMIN') throw new RequestError('Only an administrator can reroute overtime.')
+  if (!can(actor, 'MANAGE_TIME_RECORDS')) throw new RequestError('Only an administrator can reroute overtime.')
 
   await db.$transaction(async (tx) => {
     const log = await lockedLog(tx, args.logId)
@@ -537,7 +538,7 @@ export async function cancelOvertimeLog(
     const log = await lockedLog(tx, args.logId)
     const own = actor.id === log.employeeId
 
-    if (!own && actor.role !== 'ADMIN') {
+    if (!own && !can(actor, 'MANAGE_TIME_RECORDS')) {
       throw new RequestError('You can only cancel your own overtime.')
     }
     if (!own && !args.reason) {
@@ -547,7 +548,7 @@ export async function cancelOvertimeLog(
     }
     let reversedMinutes = 0
     if (log.status === 'APPROVED') {
-      if (actor.role !== 'ADMIN' || own) {
+      if (!can(actor, 'MANAGE_TIME_RECORDS') || own) {
         throw new RequestError(
           'Approved overtime can only be cancelled by an administrator, and not their own.',
         )

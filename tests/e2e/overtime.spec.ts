@@ -16,6 +16,14 @@ async function signIn(page: Page, email: string) {
 }
 
 /**
+ * Form errors only. A bare getByRole('alert') also matches Next's route
+ * announcer, which appears once the client router hydrates.
+ */
+function formAlert(page: Page) {
+  return page.locator('p[role="alert"], span[role="alert"]')
+}
+
+/**
  * Recent past days, a different set on each run, so a log left by an earlier
  * run does not trip the one-log-a-day rule. Within the last two months, so
  * they stay in the current benefit year for most of it.
@@ -51,7 +59,7 @@ test('an exempt employee banks approved overtime as comp time', async ({ page })
       submitted = true
       break
     }
-    await expect(page.getByRole('alert')).toContainText('already logged')
+    await expect(formAlert(page)).toContainText('already logged')
   }
   expect(submitted, 'every candidate day already had a log').toBe(true)
 

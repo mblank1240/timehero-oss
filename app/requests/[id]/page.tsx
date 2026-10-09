@@ -25,6 +25,7 @@ import {
   formatTimestamp,
 } from '@/lib/requests/format'
 import { canView, requestDetail } from '@/lib/requests/queries'
+import { can } from '@/lib/permissions'
 
 export const metadata = { title: 'Leave request · TimeHero' }
 
@@ -52,15 +53,15 @@ export default async function RequestPage({ params }: PageProps<'/requests/[id]'
     })
 
   const own = user.id === request.employeeId
-  const isAdmin = user.role === 'ADMIN'
+  const actsForOthers = can(user, 'MANAGE_TIME_RECORDS')
   const current = request.status === 'PENDING' ? currentStep(request.steps) : null
   const canDecide = current !== null && mayDecide(current, user, request.employeeId)
-  const canOverride = current !== null && isAdmin && !own && !canDecide
+  const canOverride = current !== null && actsForOthers && !own && !canDecide
 
   const started = request.days.some((d) => d.date <= today)
   const cancellable =
     (request.status === 'PENDING' || request.status === 'APPROVED') &&
-    (own ? request.status === 'PENDING' || !started : isAdmin)
+    (own ? request.status === 'PENDING' || !started : actsForOthers)
 
   const rerouteTargets = canOverride
     ? await db.employee.findMany({
@@ -267,7 +268,7 @@ export default async function RequestPage({ params }: PageProps<'/requests/[id]'
         </section>
       )}
 
-      {isAdmin && !own && (request.status === 'PENDING' || request.status === 'APPROVED') && (
+      {actsForOthers && !own && (request.status === 'PENDING' || request.status === 'APPROVED') && (
         <section className="space-y-2 border-t border-border pt-6">
           <h2 className="text-lg font-semibold">Amend</h2>
           <p className="text-sm text-muted">

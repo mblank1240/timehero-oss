@@ -11,6 +11,7 @@ import { timesheetInboxFor } from '@/lib/timesheets/queries'
 
 import { currentStep } from './chain'
 import type { RequestFilters } from './filters'
+import { can } from '@/lib/permissions'
 
 const PERSON = { select: { id: true, firstName: true, lastName: true } } as const
 
@@ -66,7 +67,7 @@ type Detail = NonNullable<Awaited<ReturnType<typeof requestDetail>>>
 
 /** The requester, an administrator, or anyone the request has been routed to. */
 export function canView(viewer: CurrentUser, request: Detail): boolean {
-  if (viewer.role === 'ADMIN') return true
+  if (can(viewer, 'VIEW_TIME_RECORDS')) return true
   if (viewer.id === request.employeeId) return true
   return request.steps.some((s) => s.approverId === viewer.id || s.decidedById === viewer.id)
 }
@@ -123,7 +124,7 @@ export async function inboxFor(viewer: CurrentUser) {
       steps: {
         some: {
           status: 'PENDING',
-          ...(viewer.role === 'ADMIN'
+          ...(can(viewer, 'MANAGE_TIME_RECORDS')
             ? { OR: [{ approverId: viewer.id }, { approverId: null }] }
             : { approverId: viewer.id }),
         },
@@ -137,7 +138,7 @@ export async function inboxFor(viewer: CurrentUser) {
     const current = currentStep(request.steps)
     if (!current) return false
     return (
-      current.approverId === viewer.id || (current.approverId === null && viewer.role === 'ADMIN')
+      current.approverId === viewer.id || (current.approverId === null && can(viewer, 'MANAGE_TIME_RECORDS'))
     )
   })
 }

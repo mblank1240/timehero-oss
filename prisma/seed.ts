@@ -172,12 +172,19 @@ async function main() {
   const types = new Map(
     (await db.employeeType.findMany({ select: { id: true, name: true } })).map((t) => [t.name, t.id]),
   )
+  // The access roles the migration created: Administrator, and Finance for
+  // the five reports.
+  const accessRoles = {
+    ADMIN: (await db.accessRole.findFirstOrThrow({ where: { allPermissions: true } })).id,
+    FINANCE: (await db.accessRole.findUniqueOrThrow({ where: { name: 'Finance' } })).id,
+    EMPLOYEE: null,
+  }
   for (const { type, ...person } of people) {
     const employeeTypeId = (type && types.get(type)) || null
     await db.employee.upsert({
       where: { email: person.email },
       update: {},
-      create: { ...person, employeeTypeId },
+      create: { ...person, employeeTypeId, accessRoleId: accessRoles[person.role] },
     })
     // A database seeded before employee types existed gets the label too.
     if (employeeTypeId) {

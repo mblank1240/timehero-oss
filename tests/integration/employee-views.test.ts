@@ -53,7 +53,7 @@ async function person(key: string): Promise<Actor & { employmentType: 'SALARIED_
     },
   })
   employeeIds.push(employee.id)
-  return { id: employee.id, role: employee.role, employmentType: 'SALARIED_EXEMPT' }
+  return { id: employee.id, permissions: [], employmentType: 'SALARIED_EXEMPT' }
 }
 
 function form(days: Record<string, number>) {

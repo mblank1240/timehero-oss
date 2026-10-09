@@ -108,12 +108,15 @@ async function main() {
     const schedule = await db.paySchedule.findFirstOrThrow({ where: { isDefault: true } })
     const effectiveFrom = new Date(`${hireDate}T00:00:00.000Z`)
 
+    // Created by the migrations; it holds every permission.
+    const administrator = await db.accessRole.findFirstOrThrow({ where: { allPermissions: true } })
     const admin = await db.employee.create({
       data: {
         email: answers['admin-email'].toLowerCase(),
         firstName: answers['admin-first-name'],
         lastName: answers['admin-last-name'],
         role: 'ADMIN',
+        accessRoleId: administrator.id,
         employmentType: 'SALARIED_EXEMPT',
         hireDate: effectiveFrom,
         departmentId: department.id,

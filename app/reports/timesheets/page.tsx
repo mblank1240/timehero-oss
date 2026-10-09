@@ -2,7 +2,7 @@ import Link from 'next/link'
 
 import { TimesheetStatusBadge } from '@/components/timesheet-table'
 import { todayIn } from '@/lib/accrual/dates'
-import { requireReportsAccess } from '@/lib/authz'
+import { requirePermission } from '@/lib/authz'
 import { db } from '@/lib/db'
 import { formatDuration } from '@/lib/duration'
 import { orgSettingsOrThrow } from '@/lib/ledger/policies'
@@ -10,6 +10,7 @@ import { formatLeaveDate } from '@/lib/requests/format'
 import { TIMELINESS_LABEL, type Timeliness } from '@/lib/timesheets/due'
 import { formatPeriod } from '@/lib/timesheets/format'
 import { periodReport } from '@/lib/timesheets/report'
+import { can } from '@/lib/permissions'
 
 export const metadata = { title: 'Timesheets · Reports · TimeHero' }
 
@@ -24,7 +25,7 @@ const PAST_PERIODS = 12
 export default async function TimesheetReportPage({
   searchParams,
 }: PageProps<'/reports/timesheets'>) {
-  const user = await requireReportsAccess()
+  const user = await requirePermission('REPORT_TIMESHEETS')
   const { period: requested } = await searchParams
   const org = await orgSettingsOrThrow()
   const today = todayIn(org.timezone)
@@ -68,7 +69,7 @@ export default async function TimesheetReportPage({
         <p className="mt-1 text-sm text-muted">
           Every hourly employee due a timesheet for the pay period, and where theirs stands.
           Download one employee&apos;s timesheet from their row, or every one at once.
-          {user.role === 'ADMIN' && ' Open one to approve it on someone’s behalf or unlock it.'}
+          {can(user, 'MANAGE_TIME_RECORDS') && ' Open one to approve it on someone’s behalf or unlock it.'}
         </p>
       </div>
 
@@ -126,7 +127,7 @@ export default async function TimesheetReportPage({
           {counts.get('MISSING') ? (
             <p className="text-sm text-muted">
               A timesheet that has not been created appears once the{' '}
-              {user.role === 'ADMIN' ? (
+              {can(user, 'MANAGE_JOBS') ? (
                 <Link href="/admin/jobs" className="underline">
                   create-timesheets
                 </Link>

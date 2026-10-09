@@ -31,6 +31,7 @@ import { applyDecision, currentStep, mayDecide, snapshotChain, type Actor } from
 import { assess, isoToDate, loadLeaveContext } from './context'
 import { leaveRequestInput } from './schema'
 import { checkDays, type DayInput } from './validate'
+import { can } from '@/lib/permissions'
 
 type Tx = Prisma.TransactionClient
 
@@ -198,7 +199,7 @@ export async function submitLeaveRequest(
   const org = await orgSettingsOrThrow()
 
   if (onBehalf) {
-    if (actor.role !== 'ADMIN') {
+    if (!can(actor, 'MANAGE_TIME_RECORDS')) {
       throw new RequestError('Only an administrator can enter leave for someone else.')
     }
     if (onBehalf.employeeId === actor.id) {
@@ -456,7 +457,7 @@ export async function decideLeaveRequest(actor: Actor, args: DecideArgs): Promis
     if (!current) throw new RequestError('This request has already been decided.')
 
     if (override) {
-      if (actor.role !== 'ADMIN')
+      if (!can(actor, 'MANAGE_TIME_RECORDS'))
         throw new RequestError('Only an administrator can override a step.')
       if (actor.id === request.employeeId) {
         throw new RequestError('You cannot override a step on your own request.')
@@ -593,7 +594,7 @@ export async function rerouteLeaveRequest(
   actor: Actor,
   args: { requestId: string; approverId: string; reason: string },
 ): Promise<void> {
-  if (actor.role !== 'ADMIN') throw new RequestError('Only an administrator can reroute a request.')
+  if (!can(actor, 'MANAGE_TIME_RECORDS')) throw new RequestError('Only an administrator can reroute a request.')
 
   await db.$transaction(async (tx) => {
     const request = await lockedRequest(tx, args.requestId)
@@ -676,7 +677,7 @@ export async function amendLeaveRequest(
   actor: Actor,
   args: { requestId: string; values: unknown; reason: string; allowOverdraw: boolean },
 ): Promise<void> {
-  if (actor.role !== 'ADMIN') throw new RequestError('Only an administrator can amend a request.')
+  if (!can(actor, 'MANAGE_TIME_RECORDS')) throw new RequestError('Only an administrator can amend a request.')
   const org = await orgSettingsOrThrow()
 
   const parsed = leaveRequestInput({
@@ -898,7 +899,7 @@ export async function cancelLeaveRequest(
     const request = await lockedRequest(tx, args.requestId)
     const own = actor.id === request.employeeId
 
-    if (!own && actor.role !== 'ADMIN') {
+    if (!own && !can(actor, 'MANAGE_TIME_RECORDS')) {
       throw new RequestError('You can only cancel your own requests.')
     }
     if (!own && !args.reason) {
@@ -911,7 +912,7 @@ export async function cancelLeaveRequest(
       throw new RequestError('Only a pending or approved request can be cancelled.')
     }
 
-    if (request.status === 'APPROVED' && !(actor.role === 'ADMIN' && !own)) {
+    if (request.status === 'APPROVED' && !(can(actor, 'MANAGE_TIME_RECORDS') && !own)) {
       const started = request.days.some((d) => d.date <= today)
       if (started) {
         throw new RequestError(

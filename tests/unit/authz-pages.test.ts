@@ -4,20 +4,38 @@ import { join, relative } from 'node:path'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
+import { ADMIN_SECTIONS, REPORT_SECTIONS } from '@/lib/permissions'
+
 /**
  * A layout's check is not a page's check: Next can render a page segment
  * without re-running the layout above it. So every page under a gated tree
  * calls the gate itself, and this test fails the build for one that forgets.
+ * It also holds each page to the permission its section is listed under, so
+ * the navigation and the gate cannot drift apart.
  */
 const ROOT = join(__dirname, '..', '..')
 
 const GATES = [
-  { dir: 'app/admin', guard: 'requireAdmin' },
-  { dir: 'app/reports', guard: 'requireReportsAccess' },
+  { dir: 'app/admin', sections: ADMIN_SECTIONS },
+  { dir: 'app/reports', sections: REPORT_SECTIONS },
 ] as const
 
-/** The function the first statement of the page's default export awaits, if any. */
-function firstAwaited(path: string, source: string): string | null {
+/** Pages gated differently from their section, and why. */
+const EXCEPTIONS: Record<string, { guard: string; permission?: string }> = {
+  // Recording leave for someone is acting on their time records.
+  'app/admin/employees/[id]/leave/page.tsx': {
+    guard: 'requirePermission',
+    permission: 'MANAGE_TIME_RECORDS',
+  },
+  // Reads nothing: it sends each person to the first report they may read.
+  'app/reports/page.tsx': { guard: 'requireUser' },
+}
+
+/**
+ * The function the first statement of the page's default export awaits, and
+ * its first argument when that is a string literal.
+ */
+function firstAwaited(path: string, source: string): { guard: string; argument?: string } | null {
   const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
   const page = file.statements.find(
     (s): s is ts.FunctionDeclaration =>
@@ -33,7 +51,12 @@ function firstAwaited(path: string, source: string): string | null {
       : undefined
   if (!expression || !ts.isAwaitExpression(expression)) return null
   const call = expression.expression
-  return ts.isCallExpression(call) && ts.isIdentifier(call.expression) ? call.expression.text : null
+  if (!ts.isCallExpression(call) || !ts.isIdentifier(call.expression)) return null
+  const [arg] = call.arguments
+  return {
+    guard: call.expression.text,
+    ...(arg && ts.isStringLiteral(arg) ? { argument: arg.text } : {}),
+  }
 }
 
 function pagesUnder(dir: string): string[] {
@@ -43,7 +66,7 @@ function pagesUnder(dir: string): string[] {
 }
 
 describe('gated pages check access themselves', () => {
-  for (const { dir, guard } of GATES) {
+  for (const { dir, sections } of GATES) {
     const pages = pagesUnder(dir)
 
     it(`finds the pages under ${dir}`, () => {
@@ -51,12 +74,25 @@ describe('gated pages check access themselves', () => {
     })
 
     for (const page of pages) {
-      it(`${relative('.', page)} awaits ${guard}()`, () => {
-        const source = readFileSync(join(ROOT, page), 'utf8')
-        expect(source).toMatch(new RegExp(`import \\{[^}]*\\b${guard}\\b[^}]*\\} from '@/lib/authz'`))
+      const path = relative('.', page).split('\\').join('/')
+      const section = sections.find((s) => path.startsWith(`app${s.href}/`))
+      const expected = EXCEPTIONS[path] ?? {
+        guard: 'requirePermission',
+        permission: section?.permission,
+      }
 
-        // The gate is the first thing the page does, before it reads anything.
-        expect(firstAwaited(page, source)).toBe(guard)
+      it(`${path} awaits ${expected.guard}(${expected.permission ?? ''})`, () => {
+        const source = readFileSync(join(ROOT, page), 'utf8')
+        expect(source).toMatch(
+          new RegExp(`import \\{[^}]*\\b${expected.guard}\\b[^}]*\\} from '@/lib/authz'`),
+        )
+
+        // The gate is the first thing the page does, before it reads anything,
+        // and asks for the permission its section is listed under.
+        expect(firstAwaited(page, source)).toEqual({
+          guard: expected.guard,
+          ...(expected.permission ? { argument: expected.permission } : {}),
+        })
       })
     }
   }

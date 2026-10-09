@@ -7,6 +7,8 @@
  * tested without a database.
  */
 
+import { can, type Permission } from '@/lib/permissions'
+
 export type StepStatus = 'PENDING' | 'APPROVED' | 'DENIED' | 'SKIPPED'
 
 /** One row of an employee's configured `ApprovalChainStep` list. */
@@ -68,7 +70,7 @@ export function currentStep<T extends StepState>(steps: readonly T[]): T | null 
   return steps.filter((s) => s.status === 'PENDING').sort((a, b) => a.step - b.step)[0] ?? null
 }
 
-export type Actor = { id: string; role: 'EMPLOYEE' | 'ADMIN' | 'FINANCE' }
+export type Actor = { id: string; permissions: readonly Permission[] }
 
 /**
  * Whether `actor` may decide `step` as an ordinary approver — without an
@@ -81,7 +83,7 @@ export type Actor = { id: string; role: 'EMPLOYEE' | 'ADMIN' | 'FINANCE' }
 export function mayDecide(step: StepState, actor: Actor, requesterId: string): boolean {
   if (actor.id === requesterId) return false
   if (step.status !== 'PENDING') return false
-  if (step.approverId === null) return actor.role === 'ADMIN'
+  if (step.approverId === null) return can(actor, 'MANAGE_TIME_RECORDS')
   return step.approverId === actor.id
 }
 

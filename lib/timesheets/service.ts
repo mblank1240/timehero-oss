@@ -31,6 +31,7 @@ import { RequestError } from '@/lib/requests/service'
 import { gridFor, isEditable, liveLinesFor, sheetHead, type SheetHead } from './data'
 import { isEmployedOn, periodDates } from './grid'
 import { timesheetGridInput, type GridDayInput } from './schema'
+import { can } from '@/lib/permissions'
 
 type Tx = Prisma.TransactionClient
 
@@ -83,7 +84,7 @@ export async function saveTimesheet(
     const sheet = await lockedSheet(tx, args.timesheetId)
 
     const onBehalf = sheet.employeeId !== actor.id
-    if (onBehalf && actor.role !== 'ADMIN') {
+    if (onBehalf && !can(actor, 'MANAGE_TIME_RECORDS')) {
       throw new RequestError('You can only fill in your own timesheet.')
     }
     if (onBehalf && (!args.reason || args.reason.length < 5)) {
@@ -290,7 +291,7 @@ export async function unlockTimesheet(
   actor: Actor,
   args: { timesheetId: string; reason: string },
 ): Promise<void> {
-  if (actor.role !== 'ADMIN') throw new RequestError('Only an administrator can unlock a timesheet.')
+  if (!can(actor, 'MANAGE_TIME_RECORDS')) throw new RequestError('Only an administrator can unlock a timesheet.')
 
   await db.$transaction(async (tx) => {
     const sheet = await lockedSheet(tx, args.timesheetId)
@@ -372,7 +373,7 @@ export async function decideTimesheet(
     if (!current) throw new RequestError('This timesheet is not waiting for approval.')
 
     if (override) {
-      if (actor.role !== 'ADMIN') {
+      if (!can(actor, 'MANAGE_TIME_RECORDS')) {
         throw new RequestError('Only an administrator can override a step.')
       }
       if (actor.id === sheet.employeeId) {
@@ -467,7 +468,7 @@ export async function rerouteTimesheet(
   actor: Actor,
   args: { timesheetId: string; approverId: string; reason: string },
 ): Promise<void> {
-  if (actor.role !== 'ADMIN') {
+  if (!can(actor, 'MANAGE_TIME_RECORDS')) {
     throw new RequestError('Only an administrator can reroute a timesheet.')
   }
 

@@ -88,26 +88,26 @@ describe('mayDecide', () => {
   const open = { ...step, approverId: null }
 
   it('lets the named approver act', () => {
-    expect(mayDecide(step, { id: 'a1', role: 'EMPLOYEE' }, ME)).toBe(true)
+    expect(mayDecide(step, { id: 'a1', permissions: [] }, ME)).toBe(true)
   })
 
-  it('does not let anyone else act, administrators included', () => {
-    expect(mayDecide(step, { id: 'x', role: 'EMPLOYEE' }, ME)).toBe(false)
-    expect(mayDecide(step, { id: 'x', role: 'ADMIN' }, ME)).toBe(false)
+  it('does not let anyone else act, those who act for others included', () => {
+    expect(mayDecide(step, { id: 'x', permissions: [] }, ME)).toBe(false)
+    expect(mayDecide(step, { id: 'x', permissions: ['MANAGE_TIME_RECORDS'] }, ME)).toBe(false)
   })
 
-  it('lets any administrator act on an open step, but not an employee', () => {
-    expect(mayDecide(open, { id: 'x', role: 'ADMIN' }, ME)).toBe(true)
-    expect(mayDecide(open, { id: 'x', role: 'EMPLOYEE' }, ME)).toBe(false)
+  it('lets anyone who acts for others act on an open step, but not an employee', () => {
+    expect(mayDecide(open, { id: 'x', permissions: ['MANAGE_TIME_RECORDS'] }, ME)).toBe(true)
+    expect(mayDecide(open, { id: 'x', permissions: [] }, ME)).toBe(false)
   })
 
-  it('never lets the requester decide, even as an administrator on an open step', () => {
-    expect(mayDecide(open, { id: ME, role: 'ADMIN' }, ME)).toBe(false)
-    expect(mayDecide({ ...step, approverId: ME }, { id: ME, role: 'EMPLOYEE' }, ME)).toBe(false)
+  it('never lets the requester decide, even one who acts for others, on an open step', () => {
+    expect(mayDecide(open, { id: ME, permissions: ['MANAGE_TIME_RECORDS'] }, ME)).toBe(false)
+    expect(mayDecide({ ...step, approverId: ME }, { id: ME, permissions: [] }, ME)).toBe(false)
   })
 
   it('refuses a step that is no longer pending', () => {
-    expect(mayDecide({ ...step, status: 'APPROVED' }, { id: 'a1', role: 'EMPLOYEE' }, ME)).toBe(
+    expect(mayDecide({ ...step, status: 'APPROVED' }, { id: 'a1', permissions: [] }, ME)).toBe(
       false,
     )
   })

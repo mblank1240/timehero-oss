@@ -48,15 +48,17 @@ Because minutes are integers, a balance is exact — it never drifts, and two ba
 
 ## People
 
-**Employee** — `email` (unique), `firstName`, `lastName`, `role` (EMPLOYEE | ADMIN | FINANCE — finance reads and exports reports and changes nothing), `employmentType` (HOURLY | SALARIED_EXEMPT), `hireDate`, `terminationDate` (nullable), `departmentId`, `payScheduleId`, `standardMinutesPerDay` (Int, default **480**), `isActive`, `needsReview` (set on anyone created from the directory, or whose directory account was disabled; saving the record clears it), `approvalDigest` (approval email as one daily digest instead of one each), `employeeTypeId` (nullable; the employee type they were created from, kept as a label).
+**Employee** — `email` (unique), `firstName`, `lastName`, `accessRoleId` (nullable; what they may do beyond their own records — none is an ordinary employee), `role` (superseded by `accessRoleId` and no longer read; kept for the release before, dropped later), `employmentType` (HOURLY | SALARIED_EXEMPT), `hireDate`, `terminationDate` (nullable), `departmentId`, `payScheduleId`, `standardMinutesPerDay` (Int, default **480**), `isActive`, `needsReview` (set on anyone created from the directory, or whose directory account was disabled; saving the record clears it), `approvalDigest` (approval email as one daily digest instead of one each), `employeeTypeId` (nullable; the employee type they were created from, kept as a label).
+
+**AccessRole** — `name` (unique), `description`, `permissions` (`Permission[]`), `allPermissions` (true only for the built-in Administrator, which cannot be edited or deleted). What each permission means is in `lib/permissions.ts` and `docs/SPEC.md`. Deleting a role somebody holds is refused (`Restrict`).
 
 > `standardMinutesPerDay` is what makes "half a day" meaningful per person. A 480-minute employee at a 240-minute increment requests in half-days; a part-timer on 240 requests in whole days.
 
 > `employmentType = SALARIED_EXEMPT` gates comp-time accrual. Check it in the service layer *and* as a DB constraint on `COMP_EARNED` entries.
 
-**Identity** — `employeeId`, `provider` (MICROSOFT | GOOGLE), `subject` (Entra object id or Google `sub`), `tenant`, `email`, `directoryAccountEnabled`, `lastUsedAt`. Unique on `(provider, subject)`. A Microsoft or Google account bound to an employee, matched by `subject` after the first sign-in so a changed address does not lock anyone out. Replaced `Employee.entraOid`.
+**Identity** — `employeeId`, `provider` (MICROSOFT | GOOGLE), `subject` (Entra object id or Google `sub`), `tenant`, `email`, `directoryAccountEnabled`, `directoryManagerSubject` (the account's manager at the last sync; a change is what flags an approval chain for review), `lastUsedAt`. Unique on `(provider, subject)`. A Microsoft or Google account bound to an employee, matched by `subject` after the first sign-in so a changed address does not lock anyone out. Replaced `Employee.entraOid`.
 
-**DirectoryConnection** — `provider` (unique), `tenantId`, `domains` (non-empty), `autoProvision`, `connectedById`, `lastSyncAt`, `lastSyncDetail`. The organization's own Microsoft tenant or Google Workspace, registered by an administrator. Only accounts from it, with addresses in its domains, are linked by email or imported.
+**DirectoryConnection** — `provider` (unique), `tenantId`, `domains` (non-empty), `autoProvision`, `chainsFromManager` (start an empty approval chain with the directory manager, and flag a manager change), `connectedById`, `lastSyncAt`, `lastSyncDetail`. The organization's own Microsoft tenant or Google Workspace, registered by an administrator. Only accounts from it, with addresses in its domains, are linked by email or imported.
 
 **SignInLinkRequest** — `email`, `ipAddress`, `employeeId`, `tokenHash` (unique), `expiresAt`, `usedAt`. Every request for an emailed sign-in link; the rate limits count them. Only a request for an employee who may sign in has a token, and only its SHA-256 is stored.
 

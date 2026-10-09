@@ -7,6 +7,7 @@
 import type { CurrentUser } from '@/lib/authz'
 import { db } from '@/lib/db'
 import { currentStep } from '@/lib/requests/chain'
+import { can, canAny } from '@/lib/permissions'
 
 const PERSON = { select: { id: true, firstName: true, lastName: true } } as const
 
@@ -46,7 +47,7 @@ export function canViewTimesheet(
   steps: readonly { approverId: string | null; decidedById: string | null }[],
 ): boolean {
   // Finance reads every timesheet for payroll, and can change none of them.
-  if (viewer.role === 'ADMIN' || viewer.role === 'FINANCE') return true
+  if (canAny(viewer, ['VIEW_TIME_RECORDS', 'REPORT_TIMESHEETS'])) return true
   if (viewer.id === sheet.employeeId) return true
   return steps.some((s) => s.approverId === viewer.id || s.decidedById === viewer.id)
 }
@@ -69,7 +70,7 @@ export async function timesheetInboxFor(viewer: CurrentUser) {
       steps: {
         some: {
           status: 'PENDING',
-          ...(viewer.role === 'ADMIN'
+          ...(can(viewer, 'MANAGE_TIME_RECORDS')
             ? { OR: [{ approverId: viewer.id }, { approverId: null }] }
             : { approverId: viewer.id }),
         },
@@ -83,7 +84,7 @@ export async function timesheetInboxFor(viewer: CurrentUser) {
     const current = currentStep(sheet.steps)
     if (!current) return false
     return (
-      current.approverId === viewer.id || (current.approverId === null && viewer.role === 'ADMIN')
+      current.approverId === viewer.id || (current.approverId === null && can(viewer, 'MANAGE_TIME_RECORDS'))
     )
   })
 }

@@ -274,7 +274,7 @@ The zip is written by `lib/zip.ts`, about a hundred lines that store files uncom
 
 ## Finance is a role, and reads without writing
 
-Payroll needs every timesheet without being able to change one. `FINANCE` is a third value of `Role`: a finance user is an ordinary employee (requests leave, appears in chains) who can also open `/reports` and download the exports. Every write path in the code checks for `ADMIN` specifically, so finance gets no settings, no overrides and no unlocks without any of those paths changing; `canReadReports()` in `lib/roles.ts` is the single place that grants the reading. Reports live under `/reports` rather than `/admin` so the admin layout's guard stays admin-only.
+Payroll needs every timesheet without being able to change one. `FINANCE` is a third value of `Role`: a finance user is an ordinary employee (requests leave, appears in chains) who can also open `/reports` and download the exports. Every write path in the code checks for `ADMIN` specifically, so finance gets no settings, no overrides and no unlocks without any of those paths changing; `canReadReports()` in `lib/roles.ts` is the single place that grants the reading. Reports live under `/reports` rather than `/admin` so the admin layout's guard stays admin-only. *Superseded by access roles — see "Permissions are given out in access roles, not fixed roles" below; Finance is now an ordinary role holding the five report permissions.*
 
 ## Timesheets are due a set number of days after the period, and lateness is only shown
 
@@ -413,3 +413,22 @@ The year's last pay period is the one accrual a missed run can lose — inside a
 ## Late approvals are refused, not written
 
 Three things can change between submission and final approval that a balance check on the requested days alone does not see: the benefit year closes, a lot the request would spend expires and is forfeited, or — for overtime — the comp it would bank expires. Each is refused at final approval with a message telling the approver to deny it and, where time is owed, to have an administrator post an adjustment. Writing them anyway would put entries into a closed year, spend forfeited time twice, or bank time that is forfeited the same night; all three are corrections an administrator can make deliberately but the approval flow should not make silently.
+
+## Permissions are given out in access roles, not fixed roles
+
+Decided by the owner on 2026-10-09. The three fixed roles — employee, administrator, finance — could not express "administers the system but sees nobody's time records", which the developer maintaining the installation needs, nor let an administrator choose what finance sees. Each guard now asks for a permission (`lib/permissions.ts`), and administrators bundle permissions into named `AccessRole`s and give each person one or none.
+
+Roles rather than per-person checkboxes, because at a hundred staff a handful of named roles shows at a glance who can do what. Administrator holds every permission through a flag rather than a list, so a permission added later reaches it without a migration. `MANAGE_ACCESS` is the only way to change access, and is for a trusted few: it can grant anything. Three rules close the obvious holes. Nobody changes their own access. Nobody edits a person who holds a permission they lack, since editing an address is enough to take an account over by emailed link. And `assertSomeoneManagesAccess` runs inside every transaction that could leave nobody able to sign in and manage access, after the write, so a change that would do it rolls back whichever path it came by.
+
+`employees.role` stays for one release. The release before reads it while the migration runs (`docs/AZURE-SETUP.md`), and the migration sets every existing administrator and finance employee's access role from it, so nobody's access changes. A rollback to that release would read the stale column for anyone whose access changed since. A later migration drops it.
+
+## Approval chains start from the directory manager, and are never rewritten by it
+
+Decided by the owner on 2026-10-09. The Entra manager is the obvious first approver, but the directory is a record of who reports to whom, not of who approves leave — some organizations route through a department head or an office manager instead. So the sync fills an empty chain and flags a change, and leaves every chain an administrator has set alone. A change is measured against the manager the last sync recorded on the identity, so the first sync to read managers flags nothing, and a chain that already starts with the new manager is not flagged.
+
+## An account deleted from the directory is treated as disabled
+
+Decided by the owner on 2026-10-09. The sync used to look only at the accounts the directory listed, so a leaver whose account was deleted rather than disabled simply dropped out of view: never flagged, still able to sign in by emailed link, and still accruing. Deleting is what most administrators do. So a linked account missing from a complete listing is recorded as disabled, which is what already blocks every route in, and its employee is flagged; nobody is deactivated, for the same reason a disabled account deactivates nobody.
+
+The risk is the other direction: a listing that comes back short — a revoked permission, a tenant fault — would lock everyone out at once. Graph either pages to the end or throws, so a partial listing is not expected, but a sync that would remove more than half of the linked accounts, and more than three, is not believed: it marks nothing and reports how many it withheld. Three is a sanity bound on a directory read, not an organization's policy, so it is a constant rather than a setting.
+

@@ -179,6 +179,7 @@ function user(overrides: Partial<DirectoryUser> = {}): DirectoryUser {
     accountEnabled: true,
     userType: 'Member',
     employeeHireDate: null,
+    managerId: null,
     ...overrides,
   }
 }
@@ -206,7 +207,9 @@ describe('planDirectorySync', () => {
     expect(result.link).toEqual([
       { employeeId: 'dana', user: expect.objectContaining({ id: 'u2' }) },
     ])
-    expect(result.refresh).toEqual([{ subject: 'u3', enabled: true, email: 'robin@church.org' }])
+    expect(result.refresh).toEqual([
+      { subject: 'u3', enabled: true, email: 'robin@church.org', managerSubject: null },
+    ])
   })
 
   it('skips guests, disabled accounts nobody holds, outside domains and shared addresses', () => {
@@ -233,6 +236,44 @@ describe('planDirectorySync', () => {
     )
     expect(result.flagDisabled).toEqual(['sam'])
     expect(result.refresh[0].enabled).toBe(false)
+  })
+
+  it('treats a bound account the directory no longer lists as disabled', () => {
+    const staff = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        id: `e${i}`,
+        email: `e${i}@church.org`,
+        isActive: i !== 1,
+        subjects: [`u${i}`],
+      }))
+    const listed = (ids: number[]) => ids.map((i) => user({ id: `u${i}`, mail: `e${i}@church.org` }))
+
+    // e0 and e1 have left; e1 was already deactivated, so only e0 is flagged.
+    const result = plan(listed([2, 3, 4, 5]), staff(6))
+    expect(result.missing).toEqual(['u0', 'u1'])
+    expect(result.flagMissing).toEqual(['e0'])
+    expect(result.missingWithheld).toBe(0)
+  })
+
+  it('does not believe a listing that loses more than half the bound accounts at once', () => {
+    const staff = Array.from({ length: 10 }, (_, i) => ({
+      id: `e${i}`,
+      email: `e${i}@church.org`,
+      isActive: true,
+      subjects: [`u${i}`],
+    }))
+    const someLeft = plan([user({ id: 'u0', mail: 'e0@church.org' })], staff)
+    expect(someLeft.missing).toEqual([])
+    expect(someLeft.flagMissing).toEqual([])
+    expect(someLeft.missingWithheld).toBe(9)
+
+    // An empty listing is never believed, however small the organization.
+    expect(plan([], staff.slice(0, 1)).missingWithheld).toBe(1)
+    // A few at once always are, even in a tiny one.
+    expect(plan([], []).missingWithheld).toBe(0)
+    expect(
+      plan([user({ id: 'u0', mail: 'e0@church.org' })], staff.slice(0, 4)).flagMissing,
+    ).toEqual(['e1', 'e2', 'e3'])
   })
 
   it('creates nobody when the connection does not allow it', () => {

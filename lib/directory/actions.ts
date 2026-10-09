@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 
 import { writeAudit } from '@/lib/audit'
-import { ForbiddenError, requireAdminOrThrow } from '@/lib/authz'
+import { ForbiddenError, requirePermissionOrThrow } from '@/lib/authz'
 import { db } from '@/lib/db'
 import type { ActionResult } from '@/lib/employees/actions'
 import { runJob } from '@/lib/jobs/runner'
@@ -25,7 +25,7 @@ const provider = z.enum(['MICROSOFT', 'GOOGLE'])
 
 export async function syncDirectoryNow(): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_DIRECTORY')
     const today = new Date()
     await runJob(
       {
@@ -49,7 +49,7 @@ export async function syncDirectoryNow(): Promise<ActionResult> {
  */
 export async function disconnectDirectory(which: 'MICROSOFT' | 'GOOGLE'): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_DIRECTORY')
     const before = await db.directoryConnection.findUnique({
       where: { provider: provider.parse(which) },
     })
@@ -69,24 +69,27 @@ export async function disconnectDirectory(which: 'MICROSOFT' | 'GOOGLE'): Promis
   }
 }
 
-export async function setAutoProvision(
+export async function setDirectoryOptions(
   which: 'MICROSOFT' | 'GOOGLE',
   _previous: ActionResult | null,
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
-    const autoProvision = formData.get('autoProvision') === 'true'
+    const actor = await requirePermissionOrThrow('MANAGE_DIRECTORY')
+    const options = {
+      autoProvision: formData.get('autoProvision') === 'true',
+      chainsFromManager: formData.get('chainsFromManager') === 'true',
+    }
     await db.directoryConnection.update({
       where: { provider: provider.parse(which) },
-      data: { autoProvision },
+      data: options,
     })
     await writeAudit({
       actorId: actor.id,
-      action: 'directory.autoProvision',
+      action: 'directory.options',
       entityType: 'DirectoryConnection',
       entityId: which,
-      after: { autoProvision },
+      after: options,
     })
     revalidatePath('/admin/directory')
     return { ok: true }
@@ -106,7 +109,7 @@ export async function registerGoogleWorkspace(
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_DIRECTORY')
     const parsed = googleWorkspaceInput.safeParse(Object.fromEntries(formData))
     if (!parsed.success) {
       return {

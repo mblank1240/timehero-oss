@@ -1,13 +1,12 @@
 import Link from 'next/link'
 
-import { requireAdmin } from '@/lib/authz'
+import { requirePermission } from '@/lib/authz'
 import { db } from '@/lib/db'
-import { ROLE_LABEL } from '@/lib/employees/schema'
 
 export const metadata = { title: 'Employees · TimeHero' }
 
 export default async function EmployeesPage() {
-  await requireAdmin()
+  await requirePermission('MANAGE_EMPLOYEES')
   const employees = await db.employee.findMany({
     orderBy: [{ isActive: 'desc' }, { lastName: 'asc' }, { firstName: 'asc' }],
     select: {
@@ -15,7 +14,7 @@ export default async function EmployeesPage() {
       firstName: true,
       lastName: true,
       email: true,
-      role: true,
+      accessRole: { select: { name: true } },
       employmentType: true,
       isActive: true,
       needsReview: true,
@@ -54,7 +53,7 @@ export default async function EmployeesPage() {
               <th className="px-4 py-3 font-medium">Department</th>
               <th className="px-4 py-3 font-medium">Type</th>
               <th className="px-4 py-3 font-medium">Pay basis</th>
-              <th className="px-4 py-3 font-medium">Role</th>
+              <th className="px-4 py-3 font-medium">Access</th>
               <th className="px-4 py-3 font-medium">Status</th>
             </tr>
           </thead>
@@ -75,7 +74,7 @@ export default async function EmployeesPage() {
                 <td className="px-4 py-3 text-muted">
                   {e.employmentType === 'HOURLY' ? 'Hourly' : 'Salaried'}
                 </td>
-                <td className="px-4 py-3 text-muted">{ROLE_LABEL[e.role]}</td>
+                <td className="px-4 py-3 text-muted">{e.accessRole?.name ?? 'Employee'}</td>
                 <td className="px-4 py-3">
                   {e.needsReview && (
                     <span className="mr-2 rounded-full border border-accent/40 px-2 py-0.5 text-xs font-medium text-accent">

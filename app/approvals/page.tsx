@@ -6,6 +6,7 @@ import { orgSettingsOrThrow } from '@/lib/ledger/policies'
 import { overtimeInboxFor } from '@/lib/overtime/queries'
 import { inboxFor } from '@/lib/requests/queries'
 import { timesheetInboxFor } from '@/lib/timesheets/queries'
+import { can } from '@/lib/permissions'
 
 export const metadata = { title: 'Approvals · TimeHero' }
 
@@ -29,8 +30,8 @@ export default async function ApprovalsPage() {
         <h1 className="text-2xl font-semibold">Approvals</h1>
         <p className="mt-1 text-sm text-muted">
           Requests waiting on you, oldest first. Open one to approve or deny it.
-          {user.role === 'ADMIN' &&
-            ' Requests from anyone with no approval chain come to every administrator.'}
+          {can(user, 'MANAGE_TIME_RECORDS') &&
+            ' Requests from anyone with no approval chain come to everyone who may act on others’ time records.'}
         </p>
       </div>
 

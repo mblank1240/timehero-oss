@@ -13,6 +13,8 @@ import {
   submitLeaveRequest,
 } from '@/lib/requests/service'
 
+import { accessRoleId, permissionsFor } from './legacy-roles'
+
 /**
  * Leave requests end to end against real Postgres: submission, a three-step
  * chain, denial, cancellation, overrides, and the two balance checks.
@@ -59,6 +61,7 @@ async function person(
       firstName: RUN,
       lastName: key,
       role: opts.role ?? 'EMPLOYEE',
+      accessRoleId: await accessRoleId(opts.role),
       employmentType: 'SALARIED_EXEMPT',
       hireDate: new Date('2015-01-01'),
       standardMinutesPerDay: DAY,
@@ -67,7 +70,7 @@ async function person(
   employeeIds.push(employee.id)
 
   if (opts.balance) await adjust(employee.id, opts.balance)
-  return { id: employee.id, role: employee.role }
+  return { id: employee.id, permissions: await permissionsFor(opts.role) }
 }
 
 async function adjust(employeeId: string, minutes: number) {

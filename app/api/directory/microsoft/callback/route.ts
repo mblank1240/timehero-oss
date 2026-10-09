@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
 import { writeAudit } from '@/lib/audit'
-import { ForbiddenError, requireAdminOrThrow } from '@/lib/authz'
+import { ForbiddenError, requirePermissionOrThrow } from '@/lib/authz'
 import { db } from '@/lib/db'
 import { CONSENT_STATE_COOKIE, statesMatch, tenantMismatch } from '@/lib/directory/consent'
 import { runDirectorySync } from '@/lib/directory/sync'
@@ -16,7 +16,7 @@ import { verifiedDomains } from '@/lib/microsoft/graph'
 export async function GET(request: NextRequest) {
   let actorId: string
   try {
-    actorId = (await requireAdminOrThrow()).id
+    actorId = (await requirePermissionOrThrow('MANAGE_DIRECTORY')).id
   } catch (error) {
     if (error instanceof ForbiddenError) return new Response(error.message, { status: 403 })
     throw error

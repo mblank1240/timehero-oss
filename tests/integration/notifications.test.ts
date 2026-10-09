@@ -17,6 +17,8 @@ import {
   submitLeaveRequest,
 } from '@/lib/requests/service'
 
+import { accessRoleId, permissionsFor } from './legacy-roles'
+
 /**
  * Notifications against real Postgres: what the approval services announce
  * and to whom, the channels each row is owed, delivery, and the hourly sweep's
@@ -65,13 +67,14 @@ async function person(
       firstName: RUN,
       lastName: key,
       role: opts.role ?? 'EMPLOYEE',
+      accessRoleId: await accessRoleId(opts.role),
       employmentType: opts.type ?? 'SALARIED_EXEMPT',
       hireDate: new Date('2015-01-01'),
       standardMinutesPerDay: DAY,
     },
   })
   employeeIds.push(employee.id)
-  return { id: employee.id, role: employee.role }
+  return { id: employee.id, permissions: await permissionsFor(opts.role) }
 }
 
 async function chain(employeeId: string, approvers: Actor[]) {

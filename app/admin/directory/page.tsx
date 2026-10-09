@@ -1,12 +1,12 @@
 import Link from 'next/link'
 
 import { ActionButton, ConfigForm, Field, SubmitButton } from '@/components/form'
-import { requireAdmin } from '@/lib/authz'
+import { requirePermission } from '@/lib/authz'
 import { db } from '@/lib/db'
 import {
   disconnectDirectory,
   registerGoogleWorkspace,
-  setAutoProvision,
+  setDirectoryOptions,
   syncDirectoryNow,
 } from '@/lib/directory/actions'
 import { isEntraConfigured, isGoogleConfigured } from '@/lib/env'
@@ -23,7 +23,7 @@ export const metadata = { title: 'Directory · TimeHero' }
  * Google sign-in.
  */
 export default async function DirectoryPage({ searchParams }: PageProps<'/admin/directory'>) {
-  await requireAdmin()
+  await requirePermission('MANAGE_DIRECTORY')
   const params = await searchParams
   const emailLinks = await emailLinksAvailable()
   const [org, connections, review] = await Promise.all([
@@ -102,7 +102,7 @@ export default async function DirectoryPage({ searchParams }: PageProps<'/admin/
               timezone={org.timezone}
             />
             <ConfigForm
-              action={setAutoProvision.bind(null, 'MICROSOFT')}
+              action={setDirectoryOptions.bind(null, 'MICROSOFT')}
               successMessage="Saved."
               className="flex flex-wrap items-center gap-3"
             >
@@ -114,6 +114,16 @@ export default async function DirectoryPage({ searchParams }: PageProps<'/admin/
                   defaultChecked={microsoft.autoProvision}
                 />
                 Create employees for staff in the directory who have none
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  name="chainsFromManager"
+                  value="true"
+                  defaultChecked={microsoft.chainsFromManager}
+                />
+                Start an empty approval chain with the person’s manager, and flag a manager change for
+                review
               </label>
               <SubmitButton label="Save" />
             </ConfigForm>
@@ -244,13 +254,24 @@ function SyncStatus({
     created?: number
     linked?: number
     flaggedDisabled?: number
+    chainsPrefilled?: number
+    flaggedManagerChanged?: number
+    flaggedMissing?: number
+    missingWithheld?: number
   }
   return (
     <p className={d.error ? 'text-danger' : 'text-muted'}>
       Last synced {formatTimestamp(at, timezone)}
       {d.error
         ? ` — failed: ${d.error}`
-        : ` — ${d.created ?? 0} created, ${d.linked ?? 0} linked, ${d.flaggedDisabled ?? 0} flagged as disabled.`}
+        : ` — ${d.created ?? 0} created, ${d.linked ?? 0} linked, ${d.flaggedDisabled ?? 0} flagged as disabled, ${d.flaggedMissing ?? 0} flagged as no longer in the directory, ${d.chainsPrefilled ?? 0} approval chains started from a manager, ${d.flaggedManagerChanged ?? 0} flagged for a new manager.`}
+      {!d.error && (d.missingWithheld ?? 0) > 0 && (
+        <span className="block text-danger">
+          {d.missingWithheld} linked accounts were missing from the directory — more than half of
+          them at once, so none was blocked. Check the app’s directory permission in Entra before
+          the next sync.
+        </span>
+      )}
     </p>
   )
 }

@@ -4,7 +4,7 @@ import path from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 
 import { MAIL_DIR } from '../../playwright.config'
-import { ADMIN, MAIL_FROM } from './people'
+import { ADMIN } from './people'
 
 const REQUESTER = 'music@example.test' // Robin Alvarez: chain is Dana, then Morgan
 const APPROVER = 'pastor@example.test' // Dana
@@ -17,6 +17,19 @@ async function signIn(page: Page, email: string) {
   await page.getByLabel('Employee email').fill(email)
   await page.getByRole('button', { name: 'Continue' }).click()
   await expect(page).toHaveURL('/')
+}
+
+/**
+ * The sending address the organization has set, read where an administrator
+ * sets it. The seed's sample data sets one, but a developer's database may
+ * hold their own, and the tests follow whichever it is.
+ */
+async function configuredMailFrom(page: Page): Promise<string> {
+  await signIn(page, ADMIN)
+  await page.goto('/admin/notifications')
+  const address = await page.getByLabel('Send email from').inputValue()
+  expect(address, 'set a sending address under Administration → Notifications').not.toBe('')
+  return address
 }
 
 /** Messages the dev server's file transport wrote to `to` since `since`. */
@@ -44,6 +57,7 @@ function candidateDays(): string[] {
 }
 
 test('an approver is told a request is waiting — in the app and by email', async ({ page }) => {
+  const mailFrom = await configuredMailFrom(page)
   const since = Date.now()
 
   await signIn(page, REQUESTER)
@@ -72,7 +86,7 @@ test('an approver is told a request is waiting — in the app and by email', asy
     .poll(async () => (await mailTo(APPROVER, since)).length, { timeout: 15_000 })
     .toBe(1)
   const [mail] = await mailTo(APPROVER, since)
-  expect(mail.from).toBe(MAIL_FROM)
+  expect(mail.from).toBe(mailFrom)
   expect(mail.subject).toBe('Leave request waiting on you')
   expect(mail.text).toContain(requestPath)
 
@@ -100,10 +114,8 @@ test('an approver is told a request is waiting — in the app and by email', asy
 test('with no sending address there is no email, and no emailed sign-in link', async ({
   page,
 }) => {
-  await signIn(page, ADMIN)
-  await page.goto('/admin/notifications')
+  const mailFrom = await configuredMailFrom(page)
   const address = page.getByLabel('Send email from')
-  await expect(address).toHaveValue(MAIL_FROM)
 
   try {
     await address.fill('')
@@ -123,7 +135,7 @@ test('with no sending address there is no email, and no emailed sign-in link', a
   } finally {
     await signIn(page, ADMIN)
     await page.goto('/admin/notifications')
-    await page.getByLabel('Send email from').fill(MAIL_FROM)
+    await page.getByLabel('Send email from').fill(mailFrom)
     await page.getByRole('button', { name: 'Save settings' }).click()
     await expect(page.getByText('Settings saved.')).toBeVisible()
   }
@@ -134,9 +146,10 @@ test('with no sending address there is no email, and no emailed sign-in link', a
 })
 
 test('an employee chooses how each notification reaches them', async ({ page }) => {
+  const mailFrom = await configuredMailFrom(page)
   await signIn(page, HOURLY)
   await page.goto('/notifications')
-  await expect(page.getByText(`by email from ${MAIL_FROM}`, { exact: false })).toBeVisible()
+  await expect(page.getByText(`by email from ${mailFrom}`, { exact: false })).toBeVisible()
   // Not an administrator: no rollover summary to choose about.
   await expect(page.getByText('Year-end rollover')).toHaveCount(0)
 

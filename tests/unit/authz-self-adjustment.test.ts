@@ -13,7 +13,8 @@ const ADMIN: CurrentUser = {
   email: 'admin@example.test',
   firstName: 'Ada',
   lastName: 'Admin',
-  role: 'ADMIN',
+  permissions: ['MANAGE_LEDGER'],
+  accessRoleName: 'Administrator',
   employmentType: 'SALARIED_EXEMPT',
   departmentId: null,
   standardMinutesPerDay: 480,
@@ -23,7 +24,7 @@ const { findEmployee } = vi.hoisted(() => ({ findEmployee: vi.fn() }))
 
 vi.mock('@/lib/authz', () => ({
   ForbiddenError: class ForbiddenError extends Error {},
-  requireAdminOrThrow: vi.fn(async () => ADMIN),
+  requirePermissionOrThrow: vi.fn(async () => ADMIN),
 }))
 vi.mock('@/lib/db', () => ({
   db: {

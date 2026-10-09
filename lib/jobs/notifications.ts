@@ -30,6 +30,7 @@ import { timesheetDueDate } from '@/lib/timesheets/due'
 import { formatPeriod } from '@/lib/timesheets/format'
 
 import type { JobOutcome } from './runner'
+import { effectivePermissions } from '@/lib/permissions'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 
@@ -216,7 +217,12 @@ async function sendDigests(waiting: WaitingStep[], now: Date, org: Org) {
       // Turning email off for approvals turns the digest off too.
       notificationPrefs: { none: { type: 'APPROVAL_WAITING', email: false } },
     },
-    select: { id: true, email: true, firstName: true, role: true },
+    select: {
+      id: true,
+      email: true,
+      firstName: true,
+      accessRole: { select: { permissions: true, allPermissions: true } },
+    },
   })
   if (approvers.length === 0) return counts
 
@@ -232,7 +238,9 @@ async function sendDigests(waiting: WaitingStep[], now: Date, org: Org) {
       const d = described.get(step.subject.id)!
       const theirs =
         step.approverId === approver.id ||
-        (step.approverId === null && approver.role === 'ADMIN' && d.requesterId !== approver.id)
+        (step.approverId === null &&
+          effectivePermissions(approver.accessRole).includes('MANAGE_TIME_RECORDS') &&
+          d.requesterId !== approver.id)
       if (theirs) mine.push({ step, d })
     }
     if (mine.length === 0) continue

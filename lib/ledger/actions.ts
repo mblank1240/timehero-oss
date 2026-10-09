@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache'
 
 import { writeAudit } from '@/lib/audit'
-import { ForbiddenError, requireAdminOrThrow } from '@/lib/authz'
+import { ForbiddenError, requirePermissionOrThrow } from '@/lib/authz'
 import { db } from '@/lib/db'
 import type { ActionResult } from '@/lib/employees/actions'
 
@@ -32,7 +32,7 @@ export async function createAdjustment(
   formData: FormData,
 ): Promise<ActionResult> {
   try {
-    const actor = await requireAdminOrThrow()
+    const actor = await requirePermissionOrThrow('MANAGE_LEDGER')
 
     const parsed = adjustmentInput.safeParse(Object.fromEntries(formData))
     if (!parsed.success) {

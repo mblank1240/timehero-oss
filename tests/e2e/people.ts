@@ -4,6 +4,3 @@
  */
 export const ADMIN = process.env.SEED_ADMIN_EMAIL ?? 'admin@example.test'
 export const ADMIN_NAME = 'Morgan Ellis'
-
-/** The sending address the sample data sets when the configuration has none. */
-export const MAIL_FROM = 'time@example.test'

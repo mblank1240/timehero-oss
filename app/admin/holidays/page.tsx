@@ -1,6 +1,6 @@
 import { ActionButton, ConfigForm, Field, SubmitButton } from '@/components/form'
 import { todayIn } from '@/lib/accrual/dates'
-import { requireAdmin } from '@/lib/authz'
+import { requirePermission } from '@/lib/authz'
 import { createHoliday, deleteHoliday } from '@/lib/config/actions'
 import { db } from '@/lib/db'
 import { formatDuration } from '@/lib/duration'
@@ -9,7 +9,7 @@ import { orgSettingsOrThrow } from '@/lib/ledger/policies'
 export const metadata = { title: 'Holidays · TimeHero' }
 
 export default async function HolidaysPage() {
-  await requireAdmin()
+  await requirePermission('MANAGE_POLICIES')
   const [holidays, settings] = await Promise.all([
     db.holiday.findMany({ orderBy: { date: 'asc' } }),
     orgSettingsOrThrow(),

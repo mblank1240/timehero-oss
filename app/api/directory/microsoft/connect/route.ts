@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 
 import { NextResponse } from 'next/server'
 
-import { ForbiddenError, requireAdminOrThrow } from '@/lib/authz'
+import { ForbiddenError, requirePermissionOrThrow } from '@/lib/authz'
 import { CONSENT_STATE_COOKIE, adminConsentUrl } from '@/lib/directory/consent'
 import { env, isEntraConfigured } from '@/lib/env'
 
@@ -13,7 +13,7 @@ import { env, isEntraConfigured } from '@/lib/env'
  */
 export async function GET() {
   try {
-    await requireAdminOrThrow()
+    await requirePermissionOrThrow('MANAGE_DIRECTORY')
   } catch (error) {
     if (error instanceof ForbiddenError) return new Response(error.message, { status: 403 })
     throw error

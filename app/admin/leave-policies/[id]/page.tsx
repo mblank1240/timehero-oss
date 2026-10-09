@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 
 import { LeavePolicyFields } from '@/components/config-fields'
 import { ConfigForm, SubmitButton } from '@/components/form'
-import { requireAdmin } from '@/lib/authz'
+import { requirePermission } from '@/lib/authz'
 import { saveLeavePolicy } from '@/lib/config/actions'
 import { db } from '@/lib/db'
 
@@ -12,7 +12,7 @@ export const metadata = { title: 'Edit leave policy · TimeHero' }
 export default async function EditLeavePolicyPage({
   params,
 }: PageProps<'/admin/leave-policies/[id]'>) {
-  await requireAdmin()
+  await requirePermission('MANAGE_POLICIES')
   const { id } = await params
   const [policy, types] = await Promise.all([
     db.leavePolicy.findUnique({

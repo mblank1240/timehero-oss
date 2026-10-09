@@ -1,14 +1,5 @@
 import { z } from 'zod'
 
-export const ROLES = ['EMPLOYEE', 'ADMIN', 'FINANCE'] as const
-
-export type Role = (typeof ROLES)[number]
-
-export const ROLE_LABEL: Record<Role, string> = {
-  EMPLOYEE: 'Employee',
-  ADMIN: 'Administrator',
-  FINANCE: 'Finance',
-}
 export const EMPLOYMENT_TYPES = ['HOURLY', 'SALARIED_EXEMPT'] as const
 
 const dateString = z
@@ -38,7 +29,9 @@ export const employeeInput = z
     email: z.email('Enter a valid email address.').trim().toLowerCase(),
     firstName: z.string().trim().min(1, 'First name is required.').max(100),
     lastName: z.string().trim().min(1, 'Last name is required.').max(100),
-    role: z.enum(ROLES),
+    /// Their access role, or none. Applied only for someone who may manage
+    /// access; for anyone else the action keeps what is there.
+    accessRoleId: optionalCuid,
     employmentType: z.enum(EMPLOYMENT_TYPES),
     hireDate: dateString,
     terminationDate: optionalDate,

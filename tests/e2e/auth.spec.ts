@@ -98,17 +98,22 @@ test.describe('authorization', () => {
     await expect(page.getByRole('link', { name: 'Sam Okafor' })).toBeVisible()
   })
 
-  test('an admin cannot remove their own administrator access', async ({ page }) => {
+  test('an admin cannot change their own access', async ({ page }) => {
     await signIn(page, ADMIN)
     await page.goto('/admin/employees')
     await page.getByRole('link', { name: ADMIN_NAME }).click()
 
-    await page.getByLabel('Role').selectOption('EMPLOYEE')
-    await page.getByRole('button', { name: 'Save changes' }).click()
+    // Their own record shows it, and offers nothing to change it with.
+    await expect(page.getByText('Changed by someone who manages access.')).toBeVisible()
+    await expect(page.getByLabel('Access')).toBeHidden()
+  })
 
-    await expect(formAlert(page)).toContainText(
-      'cannot remove your own administrator access',
-    )
+  test('an admin gives someone else an access role', async ({ page }) => {
+    await signIn(page, ADMIN)
+    await page.goto('/admin/employees')
+    await page.getByRole('link', { name: 'Sam Okafor' }).click()
+    await expect(page.getByLabel('Access')).toBeVisible()
+    await expect(page.getByLabel('Access').getByRole('option', { name: 'Finance' })).toBeAttached()
   })
 })
 

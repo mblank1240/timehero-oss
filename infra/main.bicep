@@ -45,6 +45,15 @@ param postgresTier string = 'Burstable'
 
 param postgresStorageGB int = 32
 
+@description('Seconds between checks that the site is up. Each run from each location is billed, so a check every 5 minutes costs three times one every 15.')
+@allowed([300, 600, 900])
+param siteCheckSeconds int = 900
+
+@description('Locations each availability test runs from, 2 to 4. An alert fires when two fail together, so 2 means both.')
+@minValue(2)
+@maxValue(4)
+param availabilityLocations int = 2
+
 @allowed(['16', '17'])
 param postgresVersion string = '17'
 
@@ -470,7 +479,8 @@ module siteUp 'modules/availability.bicep' = {
     location: location
     insightsId: insights.id
     url: '${appUrl}/api/health'
-    frequencySeconds: 300
+    frequencySeconds: siteCheckSeconds
+    locationCount: availabilityLocations
     description: 'TimeHero is not answering, or cannot reach its database.'
     actionGroupId: responders.id
   }
@@ -484,6 +494,7 @@ module jobsOnSchedule 'modules/availability.bicep' = {
     insightsId: insights.id
     url: '${appUrl}/api/health/jobs'
     frequencySeconds: 900
+    locationCount: availabilityLocations
     description: 'A TimeHero scheduled job has not succeeded on schedule. Admin → Jobs names it; run the missed dates once the workflow is fixed.'
     actionGroupId: responders.id
   }

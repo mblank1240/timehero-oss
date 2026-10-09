@@ -359,7 +359,7 @@ through the browser.*
 - [x] Submit → approval chain → lock, with send-back, resubmission and withdrawal; a trigger refuses edits to a submitted or approved timesheet
 - [x] Status grid per pay period (`/reports/timesheets`) with due dates and late/overdue marks, and unlock with a reason (audit-logged)
 - [x] Exports: one employee's CSV (a row per day, then totals), a summary CSV, or every employee's CSV at once as a .zip
-- [x] A `FINANCE` role that reads every timesheet and downloads the exports, and changes nothing
+- [x] A `FINANCE` role that reads every timesheet and downloads the exports, and changes nothing (since replaced by access roles: Finance is a role holding the report permissions)
 - [x] Due date as a setting — 3 days after the period ends, the Tuesday after a Sunday-to-Saturday period; late timesheets accepted and marked
 - [x] Pay-period sync leaves any period with timesheets alone
 
@@ -668,6 +668,19 @@ is mostly collecting the benefit.
 **Done when:** a deliberately broken job — a wrong allotment, a skipped
 rollover, a cron switched off — is caught by the reconciliation report rather
 than by an employee, and can be reversed without editing a single row.
+
+## Access roles and managers from the directory ✅
+
+- [x] Permissions (`lib/permissions.ts`) in place of the fixed roles; every
+      guard asks for one. Administrators bundle them into access roles under
+      Administration → Access. Administrator holds everything; Finance holds
+      the five reports. Nobody changes their own access, nobody edits someone
+      who holds more, and someone who can sign in always manages access.
+- [x] The directory sync reads each person's Entra manager, starts an empty
+      approval chain with them, and flags a later change for review.
+- [x] An account deleted from the directory is treated as disabled: the
+      employee is flagged and blocked from every way of signing in.
+- [ ] Drop `employees.role` once a release without it has shipped.
 
 ## Deferred
 

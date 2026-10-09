@@ -26,8 +26,8 @@ Time & leave management for small organizations — built for a church of ~75-10
 ## Layout
 
 ```
-app/             routes — app/admin/* is admin-only, app/reports/* is admin or finance,
-                 everything else is per-user
+app/             routes — each app/admin/* and app/reports/* page needs its section's
+                 permission (lib/permissions.ts); everything else is per-user
 components/      shared React components; config-fields.tsx is shared by each
                  configuration screen's add form and its edit page
 lib/env.ts       parsed environment; throws at boot on a bad config
@@ -35,11 +35,13 @@ lib/db.ts        Prisma client singleton
 lib/auth.ts      Auth.js config and the sign-in gate
 lib/sign-in-links.ts  emailed sign-in links: request, rate limits, single-use tokens
 lib/directory/   linking accounts (pure rules), the directory sync (pure plan + I/O),
-                 Microsoft admin consent
+                 approval chains from the manager (managers.ts, pure), Microsoft admin consent
 lib/microsoft/   Microsoft Graph as the app: directory reads and mail
 lib/mail/        sendMail() over smtp | graph | file | console
-lib/authz.ts     requireUser / requireAdmin / requireReportsAccess — role re-read from the DB each call
-lib/roles.ts     what each role may do, as pure functions (finance reads reports, writes nothing)
+lib/authz.ts     requireUser / requirePermission — permissions re-read from the DB each call
+lib/permissions.ts  the permission catalogue, what grants what, the admin and report sections
+                 each sits behind, as pure functions
+lib/access/      access roles: saving them, and the check that someone can always manage access
 lib/audit.ts     writeAudit + diff
 lib/accrual/     the engine — pure functions, no Prisma, heavily tested; comp.ts
                  decides what an approved overtime log banks

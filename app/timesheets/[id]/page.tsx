@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation'
 import { ConfigForm, Field, SubmitButton } from '@/components/form'
 import { GridInput, IntentButton } from '@/components/timesheet-fields'
 import { TimesheetStatusBadge } from '@/components/timesheet-table'
-import { canReadReports, requireUser } from '@/lib/authz'
+import { requireUser } from '@/lib/authz'
 import { db } from '@/lib/db'
 import { formatDuration } from '@/lib/duration'
 import { orgSettingsOrThrow } from '@/lib/ledger/policies'
@@ -25,6 +25,7 @@ import { TIMELINESS_LABEL, timeliness, timesheetDueDate } from '@/lib/timesheets
 import { formatPeriod } from '@/lib/timesheets/format'
 import { canViewTimesheet, timesheetSteps } from '@/lib/timesheets/queries'
 import { noteField, workedField } from '@/lib/timesheets/schema'
+import { can } from '@/lib/permissions'
 
 export const metadata = { title: 'Timesheet · TimeHero' }
 
@@ -63,15 +64,15 @@ export default async function TimesheetPage({ params }: PageProps<'/timesheets/[
   const clock = (minutes: number) => formatDuration(minutes, { unit: 'HOURS', minutesPerDay })
 
   const own = user.id === sheet.employeeId
-  const isAdmin = user.role === 'ADMIN'
-  const reports = canReadReports(user)
+  const actsForOthers = can(user, 'MANAGE_TIME_RECORDS')
+  const reports = can(user, 'REPORT_TIMESHEETS')
   // An administrator may fill in someone else's, with a reason (see saveTimesheet).
-  const editable = (own || isAdmin) && isEditable(sheet.status)
+  const editable = (own || actsForOthers) && isEditable(sheet.status)
   const current = sheet.status === 'SUBMITTED' ? currentStep(steps) : null
   const canDecide = current !== null && mayDecide(current, user, sheet.employeeId)
-  const canOverride = current !== null && isAdmin && !own && !canDecide
+  const canOverride = current !== null && actsForOthers && !own && !canDecide
   const canUnlock =
-    isAdmin && !own && (sheet.status === 'APPROVED' || sheet.status === 'SUBMITTED')
+    actsForOthers && !own && (sheet.status === 'APPROVED' || sheet.status === 'SUBMITTED')
   const sentBack =
     sheet.status === 'REJECTED' ? [...steps].reverse().find((s) => s.status === 'DENIED') : null
 

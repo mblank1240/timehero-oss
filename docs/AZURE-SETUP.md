@@ -40,7 +40,9 @@ address, which works the same way for any organization deploying its own copy.
 > is created.
 >
 > **Cost:** roughly $35 to $50 a month at list prices, mostly the web app and
-> the database. Please check it in the Azure pricing calculator against our
+> the database. The availability tests are billed per run; by default each
+> runs every 15 minutes from two locations (`siteCheckSeconds`,
+> `availabilityLocations`), a few dollars a month. Please check it in the Azure pricing calculator against our
 > agreement. A budget alert on the resource group would be welcome.
 >
 > **Alternative, if you'd rather keep Owner:** you run the one deployment

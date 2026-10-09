@@ -15,6 +15,8 @@ import {
   withdrawTimesheet,
 } from '@/lib/timesheets/service'
 
+import { accessRoleId, permissionsFor } from './legacy-roles'
+
 /**
  * Timesheets end to end against real Postgres: the creation job, filling one
  * in, freezing leave and holidays at submission, the approval chain round a
@@ -72,6 +74,7 @@ async function person(
       firstName: RUN,
       lastName: key,
       role: opts.role ?? 'EMPLOYEE',
+      accessRoleId: await accessRoleId(opts.role),
       employmentType: opts.type ?? 'HOURLY',
       hireDate: dayAt(opts.hireDate ?? '2020-01-01'),
       terminationDate: opts.terminationDate ? dayAt(opts.terminationDate) : null,
@@ -80,7 +83,7 @@ async function person(
     },
   })
   employeeIds.push(employee.id)
-  return { id: employee.id, role: employee.role }
+  return { id: employee.id, permissions: await permissionsFor(opts.role) }
 }
 
 async function sheetOf(employee: Actor, payPeriodId: string) {

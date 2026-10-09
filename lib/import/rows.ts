@@ -13,7 +13,7 @@
 import { z } from 'zod'
 
 import { parseDuration } from '@/lib/duration'
-import { EMPLOYMENT_TYPES, ROLES } from '@/lib/employees/schema'
+import { EMPLOYMENT_TYPES } from '@/lib/employees/schema'
 
 export type RowError = { file: string; line: number; message: string }
 
@@ -32,10 +32,16 @@ const employmentType = z
   .transform((v) => (v === 'EXEMPT' || v === 'SALARIED' ? 'SALARIED_EXEMPT' : v))
   .pipe(z.enum(EMPLOYMENT_TYPES))
 
+/**
+ * An access role's name, any case, or blank — an ordinary employee, as is
+ * `EMPLOYEE`. `ADMIN` and `FINANCE`, from before access roles, still mean the
+ * built-in Administrator and the role called Finance.
+ */
 const role = z
   .string()
-  .transform((v) => v.trim().toUpperCase() || 'EMPLOYEE')
-  .pipe(z.enum(ROLES))
+  .trim()
+  .max(60)
+  .transform((v) => (v === '' || v.toUpperCase() === 'EMPLOYEE' ? null : v))
 
 export type PolicyRef = {
   leaveTypeCode: string
@@ -49,7 +55,7 @@ export const employeeRow = z
     email: z.email('Not an email address.').trim().toLowerCase(),
     first_name: z.string().trim().min(1, 'First name is required.').max(100),
     last_name: z.string().trim().min(1, 'Last name is required.').max(100),
-    role: role.default('EMPLOYEE'),
+    role: role.default(null),
     /** May be left blank only on a row that names a `type`, which supplies it. */
     employment_type: z.union([z.literal(''), employmentType]).default(''),
     /** An employee type's name, any case. Its policies apply when `policies` is blank. */
@@ -79,7 +85,8 @@ export type EmployeeRow = {
   email: string
   firstName: string
   lastName: string
-  role: (typeof ROLES)[number]
+  /** An access role's name as written; null for none. */
+  accessRole: string | null
   /** Null only when `employeeType` is set: the type's employment type applies. */
   employmentType: (typeof EMPLOYMENT_TYPES)[number] | null
   /** An employee type's name, as written. */
@@ -176,7 +183,7 @@ export function parseEmployeeRows(
       email: v.email,
       firstName: v.first_name,
       lastName: v.last_name,
-      role: v.role,
+      accessRole: v.role,
       employmentType: v.employment_type || null,
       employeeType: v.type || null,
       hireDate: v.hire_date,

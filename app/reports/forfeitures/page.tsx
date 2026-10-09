@@ -1,6 +1,6 @@
 import { RangeFilters } from '@/components/report-filters'
 import { todayIn } from '@/lib/accrual/dates'
-import { requireReportsAccess } from '@/lib/authz'
+import { requirePermission } from '@/lib/authz'
 import { formatDuration } from '@/lib/duration'
 import { orgSettingsOrThrow } from '@/lib/ledger/policies'
 import { forfeitureReport, reportLeaveTypes } from '@/lib/reports/data'
@@ -17,7 +17,7 @@ export const metadata = { title: 'Forfeitures · Reports · TimeHero' }
 export default async function ForfeituresReportPage({
   searchParams,
 }: PageProps<'/reports/forfeitures'>) {
-  await requireReportsAccess()
+  await requirePermission('REPORT_FORFEITURES')
   const params = await searchParams
   const org = await orgSettingsOrThrow()
   const range = rangeParams(params, org, todayIn(org.timezone))

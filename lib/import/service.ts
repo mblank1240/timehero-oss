@@ -154,6 +154,10 @@ async function importEmployees(
     }
   >()
 
+  const accessRoles = await tx.accessRole.findMany({
+    select: { id: true, name: true, allPermissions: true },
+  })
+
   for (const row of rows) {
     const existing = await tx.employee.findUnique({ where: { email: row.email }, select: { id: true } })
     if (existing) {
@@ -169,6 +173,19 @@ async function importEmployees(
         continue
       }
       payScheduleId = named.id
+    }
+
+    let accessRoleId: string | null = null
+    if (row.accessRole) {
+      const named =
+        row.accessRole.toUpperCase() === 'ADMIN'
+          ? accessRoles.find((r) => r.allPermissions)
+          : accessRoles.find((r) => r.name.toLowerCase() === row.accessRole!.toLowerCase())
+      if (!named) {
+        fail(row.line, `role: no access role is called "${row.accessRole}".`)
+        continue
+      }
+      accessRoleId = named.id
     }
 
     let employeeType: (typeof employeeTypes)[number] | null = null
@@ -258,7 +275,7 @@ async function importEmployees(
         email: row.email,
         firstName: row.firstName,
         lastName: row.lastName,
-        role: row.role,
+        accessRoleId,
         employmentType,
         employeeTypeId: employeeType?.id ?? null,
         hireDate: row.hireDate,
@@ -319,7 +336,7 @@ async function importEmployees(
           email: row.email,
           firstName: row.firstName,
           lastName: row.lastName,
-          role: row.role,
+          accessRole: row.accessRole,
           employmentType,
           employeeType,
           hireDate: iso(row.hireDate),
