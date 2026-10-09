@@ -141,8 +141,8 @@ export default async function RolloverPage() {
             <h3 className="text-sm font-semibold">Carryover windows</h3>
             <p className="text-xs text-muted">
               An exception: time earned inside the window survives a rollover it would
-              otherwise fail, usable until the date given. The church&rsquo;s December
-              comp-time grace period is exactly one of these.
+              otherwise fail, usable until the date given — a December grace period for
+              comp time, for example.
             </p>
 
             {type.carryoverWindows.length > 0 && (

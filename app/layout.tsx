@@ -21,7 +21,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "TimeHero",
-  description: "Time and leave management for church staff.",
+  description: "Time and leave management for small organizations.",
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {

@@ -63,6 +63,9 @@ in the header; browsers allow push on `localhost` without HTTPS.
   or Microsoft. See `docs/SELF-HOSTING.md`.
 - **Azure** — `infra/main.bicep` provisions App Service, PostgreSQL, Key Vault
   and monitoring, deployed by GitHub Actions. See `docs/AZURE-SETUP.md`.
+- **Anywhere else** that runs Node 22 and reaches PostgreSQL 17 — a Linux
+  server, Render, Railway, Fly.io: build, migrate, start, and schedule the jobs.
+  See "Without Docker" in `docs/SELF-HOSTING.md`.
 
 Either way, `npm run setup` creates your organization from a configuration
 file and its first administrator (`docs/CONFIGURATION.md`), and
@@ -124,7 +127,7 @@ ever granted twice: the ledger's unique index refuses it.
 
 | File | Contents |
 |---|---|
-| `docs/SELF-HOSTING.md` | Running TimeHero with Docker Compose |
+| `docs/SELF-HOSTING.md` | Running TimeHero with Docker Compose, or on any Node host without it |
 | `docs/CONFIGURATION.md` | An organization's configuration file and `npm run setup` |
 | `docs/SPEC.md` | What the system does |
 | `docs/DATA-MODEL.md` | Schema, the ledger, accrual and rollover algorithms |

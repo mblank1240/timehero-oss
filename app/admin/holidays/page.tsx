@@ -27,7 +27,7 @@ export default async function HolidaysPage() {
       <div>
         <h1 className="text-2xl font-semibold">Holidays</h1>
         <p className="mt-1 text-sm text-muted">
-          Paid days the church is closed. They are excluded from leave-day counting, so
+          Paid days the organization is closed. They are excluded from leave-day counting, so
           a holiday inside a time-off request does not consume anyone&rsquo;s balance.
         </p>
       </div>
