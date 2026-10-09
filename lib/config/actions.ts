@@ -6,6 +6,7 @@ import { diff, writeAudit } from '@/lib/audit'
 import { ForbiddenError, requireAdminOrThrow } from '@/lib/authz'
 import { db } from '@/lib/db'
 import type { ActionResult } from '@/lib/employees/actions'
+import { accruableBy, overlapsAny } from '@/lib/employees/assignments'
 import { syncPayPeriodsFor } from '@/lib/payperiods/sync'
 
 import {
@@ -370,14 +371,7 @@ export async function assignLeavePolicy(
     if (!employee) return fail('That employee no longer exists.')
 
     // Comp time is exempt-only; see rule 4 in CLAUDE.md.
-    const eligible =
-      policy.leaveType.accruableBy === 'ALL' ||
-      (policy.leaveType.accruableBy === 'HOURLY_ONLY' &&
-        employee.employmentType === 'HOURLY') ||
-      (policy.leaveType.accruableBy === 'EXEMPT_ONLY' &&
-        employee.employmentType === 'SALARIED_EXEMPT')
-
-    if (!eligible) {
+    if (!accruableBy(policy.leaveType.accruableBy, employee.employmentType)) {
       return fail(
         `${policy.leaveType.name} cannot be accrued by this employee's employment type.`,
       )
@@ -391,13 +385,7 @@ export async function assignLeavePolicy(
       select: { id: true, effectiveFrom: true, effectiveTo: true },
     })
 
-    const overlaps = siblings.some((s) => {
-      const startsBeforeOtherEnds = !s.effectiveTo || data.effectiveFrom <= s.effectiveTo
-      const endsAfterOtherStarts = !data.effectiveTo || data.effectiveTo >= s.effectiveFrom
-      return startsBeforeOtherEnds && endsAfterOtherStarts
-    })
-
-    if (overlaps) {
+    if (overlapsAny(data, siblings)) {
       return fail(
         'This employee already has a policy for that leave type covering those dates. End the existing assignment first.',
       )
@@ -457,12 +445,7 @@ export async function updateLeavePolicyAssignment(
       },
       select: { effectiveFrom: true, effectiveTo: true },
     })
-    const overlaps = siblings.some((s) => {
-      const startsBeforeOtherEnds = !s.effectiveTo || data.effectiveFrom <= s.effectiveTo
-      const endsAfterOtherStarts = !data.effectiveTo || data.effectiveTo >= s.effectiveFrom
-      return startsBeforeOtherEnds && endsAfterOtherStarts
-    })
-    if (overlaps) {
+    if (overlapsAny(data, siblings)) {
       return fail(
         'Those dates overlap another assignment for the same leave type. Change that one first.',
       )

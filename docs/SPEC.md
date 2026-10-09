@@ -62,6 +62,14 @@ A single formula covers everyone: the grant lands on `max(benefit year start, hi
 
 Changing 120 to any other number, or switching a policy to proration, is an admin settings edit with no code change.
 
+### Employee types
+
+Different kinds of staff — pastors, directors, associates — start on different allotments. An **employee type** (Administration → Employee types) records that once: a name the administrator chooses, a default employment type, and at most one policy per leave type ("None" for a leave type the type doesn't grant, such as comp time, which is earned rather than granted).
+
+Choosing a type when adding an employee fills in the employment type on the form (the administrator can still change it), and on save puts the employee on the type's policies from their hire date. A policy the chosen employment type cannot hold — a comp policy for someone saved as hourly — or one retired since the type was saved is skipped, and the employee's record says so. A type cannot default an employment type to a leave type it may not accrue in the first place (rule 4).
+
+**A type is a pre-fill, nothing more.** After creation the employee's policies are their own: editing a type changes nobody already created from it, and changing an employee's type afterwards is a label change that assigns and removes nothing — their policies are changed on their own record. A retired type stays on the people who have it but is no longer offered for new employees.
+
 ## Rollover
 
 Rollover caps are set **org-wide per leave type**, not per employee. Each type's cap is one of: none, unlimited, a fixed number of minutes, or **a number of the employee's own working days**.

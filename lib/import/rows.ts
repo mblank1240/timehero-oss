@@ -50,7 +50,10 @@ export const employeeRow = z
     first_name: z.string().trim().min(1, 'First name is required.').max(100),
     last_name: z.string().trim().min(1, 'Last name is required.').max(100),
     role: role.default('EMPLOYEE'),
-    employment_type: employmentType,
+    /** May be left blank only on a row that names a `type`, which supplies it. */
+    employment_type: z.union([z.literal(''), employmentType]).default(''),
+    /** An employee type's name, any case. Its policies apply when `policies` is blank. */
+    type: z.string().trim().max(100).default(''),
     hire_date: date,
     termination_date: optionalDate.default(null),
     department: z.string().trim().default(''),
@@ -66,6 +69,10 @@ export const employeeRow = z
     path: ['termination_date'],
     message: 'Termination date cannot precede the hire date.',
   })
+  .refine((v) => v.employment_type !== '' || v.type !== '', {
+    path: ['employment_type'],
+    message: 'Required, unless the row names an employee type.',
+  })
 
 export type EmployeeRow = {
   line: number
@@ -73,7 +80,10 @@ export type EmployeeRow = {
   firstName: string
   lastName: string
   role: (typeof ROLES)[number]
-  employmentType: (typeof EMPLOYMENT_TYPES)[number]
+  /** Null only when `employeeType` is set: the type's employment type applies. */
+  employmentType: (typeof EMPLOYMENT_TYPES)[number] | null
+  /** An employee type's name, as written. */
+  employeeType: string | null
   hireDate: Date
   terminationDate: Date | null
   department: string | null
@@ -167,7 +177,8 @@ export function parseEmployeeRows(
       firstName: v.first_name,
       lastName: v.last_name,
       role: v.role,
-      employmentType: v.employment_type,
+      employmentType: v.employment_type || null,
+      employeeType: v.type || null,
       hireDate: v.hire_date,
       terminationDate: v.termination_date,
       department: v.department || null,

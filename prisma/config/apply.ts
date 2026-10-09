@@ -5,8 +5,8 @@ import type { OrganizationConfig } from './organization'
 
 /**
  * Writes an organization's configuration: org settings, departments, the pay
- * calendar and holidays, leave types, policies, rollover rules and carryover
- * windows. No people. Shared by `prisma/seed.ts` (with sample staff) and
+ * calendar and holidays, leave types, policies, rollover rules, carryover
+ * windows and employee types. No people. Shared by `prisma/seed.ts` (with sample staff) and
  * `scripts/setup.ts` (with a first administrator). Re-runnable: rows that
  * already exist are left as an administrator may have edited them, except
  * policies (see below).
@@ -39,6 +39,7 @@ export async function applyConfiguration(
 
   await applyCalendar(db, config, payAnchor)
   const typeIds = await applyLeaveConfiguration(db, config)
+  await applyEmployeeTypes(db, config, typeIds)
   return { typeIds }
 }
 
@@ -165,6 +166,44 @@ async function applyLeaveConfiguration(db: PrismaClient, config: OrganizationCon
 
   return typeIds
 
+}
+
+/**
+ * Employee types, with their default policies. A type is created, defaults
+ * and all, only when no type of that name exists: on a re-run an existing one
+ * is left exactly as an administrator may have edited it — its employment
+ * type and its defaults included — and one renamed in the app is created
+ * again under the file's name. Types only pre-fill new employees, so nothing
+ * written here ever reaches an existing employee's policies.
+ */
+async function applyEmployeeTypes(
+  db: PrismaClient,
+  config: OrganizationConfig,
+  typeIds: Map<string, string>,
+) {
+  for (const [sortOrder, type] of config.employeeTypes.entries()) {
+    const existing = await db.employeeType.findUnique({ where: { name: type.name } })
+    if (existing) continue
+
+    const policies = []
+    for (const [code, name] of Object.entries(type.policies)) {
+      const leaveTypeId = typeIds.get(code)!
+      const policy = await db.leavePolicy.findUniqueOrThrow({
+        where: { leaveTypeId_name: { leaveTypeId, name } },
+        select: { id: true },
+      })
+      policies.push({ leaveTypeId, leavePolicyId: policy.id })
+    }
+
+    await db.employeeType.create({
+      data: {
+        name: type.name,
+        employmentType: type.employmentType,
+        sortOrder,
+        policies: { create: policies },
+      },
+    })
+  }
 }
 
 /**

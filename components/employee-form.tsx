@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useActionState } from 'react'
+import { useActionState, useRef } from 'react'
 import { useFormStatus } from 'react-dom'
 
 import type { ActionResult, FormAction } from '@/lib/employees/actions'
@@ -16,6 +16,7 @@ export type EmployeeFormValues = {
   terminationDate: string
   departmentId: string
   payScheduleId: string
+  employeeTypeId: string
   standardMinutesPerDay: number
   isActive: boolean
 }
@@ -24,6 +25,13 @@ type Props = {
   action: FormAction
   departments: { id: string; name: string }[]
   paySchedules?: { id: string; name: string }[]
+  employeeTypes?: { id: string; name: string; employmentType: 'HOURLY' | 'SALARIED_EXEMPT' }[]
+  /**
+   * On a new employee, choosing a type fills in its employment type and the
+   * type's leave policies are assigned on save. On an existing one the type is
+   * a label only, and choosing it changes nothing else.
+   */
+  isNew?: boolean
   defaults?: Partial<EmployeeFormValues>
   submitLabel: string
 }
@@ -32,9 +40,12 @@ export function EmployeeForm({
   action,
   departments,
   paySchedules = [],
+  employeeTypes = [],
+  isNew = false,
   defaults,
   submitLabel,
 }: Props) {
+  const employmentTypeRef = useRef<HTMLSelectElement>(null)
   // `action` on the form element rather than an onSubmit handler: the browser
   // posts it natively if hydration hasn't finished, so the form works from
   // the moment the HTML arrives.
@@ -87,6 +98,38 @@ export function EmployeeForm({
         />
       </Field>
 
+      <Field
+        label="Employee type"
+        name="employeeTypeId"
+        errors={errors.employeeTypeId}
+        hint={
+          isNew
+            ? "Fills in the employment type, and puts them on the type's leave policies from their hire date."
+            : 'A label only. Changing it does not change their leave policies — those are managed below.'
+        }
+      >
+        <select
+          id="employeeTypeId"
+          name="employeeTypeId"
+          defaultValue={defaults?.employeeTypeId ?? ''}
+          onChange={(event) => {
+            // A pre-fill, not a binding: the administrator may still change
+            // the employment type, and the one saved is what counts.
+            if (!isNew || !employmentTypeRef.current) return
+            const chosen = employeeTypes.find((t) => t.id === event.target.value)
+            if (chosen) employmentTypeRef.current.value = chosen.employmentType
+          }}
+          className="th-input"
+        >
+          <option value="">— None —</option>
+          {employeeTypes.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </select>
+      </Field>
+
       <div className="grid gap-5 sm:grid-cols-2">
         <Field label="Role" name="role" errors={errors.role}>
           <select
@@ -108,6 +151,7 @@ export function EmployeeForm({
           hint="Only salaried (exempt) staff may accrue comp time."
         >
           <select
+            ref={employmentTypeRef}
             id="employmentType"
             name="employmentType"
             defaultValue={defaults?.employmentType ?? 'HOURLY'}

@@ -89,6 +89,7 @@ async function main() {
   const people = [
     {
       email: ADMIN_EMAIL,
+      type: 'Director',
       firstName: 'Morgan',
       lastName: 'Ellis',
       role: 'ADMIN' as const,
@@ -98,6 +99,7 @@ async function main() {
     },
     {
       email: 'pastor@example.test',
+      type: 'Pastor',
       firstName: 'Dana',
       lastName: 'Whitfield',
       role: 'ADMIN' as const,
@@ -107,6 +109,7 @@ async function main() {
     },
     {
       email: 'music@example.test',
+      type: 'Director',
       firstName: 'Robin',
       lastName: 'Alvarez',
       role: 'EMPLOYEE' as const,
@@ -116,6 +119,7 @@ async function main() {
     },
     {
       email: 'custodian@example.test',
+      type: 'Associate',
       firstName: 'Sam',
       lastName: 'Okafor',
       role: 'EMPLOYEE' as const,
@@ -127,6 +131,7 @@ async function main() {
       // Exercises the waiting period: hired recently enough that no PTO grant
       // is due yet, whenever the seed runs.
       email: 'newhire@example.test',
+      type: 'Associate',
       firstName: 'Jess',
       lastName: 'Moreau',
       role: 'EMPLOYEE' as const,
@@ -148,6 +153,7 @@ async function main() {
     {
       // Exercises the sign-in denial path.
       email: 'former@example.test',
+      type: 'Associate',
       firstName: 'Pat',
       lastName: 'Reyes',
       role: 'EMPLOYEE' as const,
@@ -159,12 +165,27 @@ async function main() {
     },
   ]
 
-  for (const person of people) {
+  // Employee types are labels here, matched by name and skipped when the
+  // configuration has no type of that name. Everyone's policies still come
+  // from assignDefaultPolicies below, so the sample balances the tests rely on
+  // do not depend on which types a configuration defines.
+  const types = new Map(
+    (await db.employeeType.findMany({ select: { id: true, name: true } })).map((t) => [t.name, t.id]),
+  )
+  for (const { type, ...person } of people) {
+    const employeeTypeId = (type && types.get(type)) || null
     await db.employee.upsert({
       where: { email: person.email },
       update: {},
-      create: person,
+      create: { ...person, employeeTypeId },
     })
+    // A database seeded before employee types existed gets the label too.
+    if (employeeTypeId) {
+      await db.employee.updateMany({
+        where: { email: person.email, employeeTypeId: null },
+        data: { employeeTypeId },
+      })
+    }
   }
 
   // A two-step chain: Robin reports to Dana, then to Morgan.

@@ -48,7 +48,7 @@ Because minutes are integers, a balance is exact — it never drifts, and two ba
 
 ## People
 
-**Employee** — `email` (unique), `firstName`, `lastName`, `role` (EMPLOYEE | ADMIN | FINANCE — finance reads and exports reports and changes nothing), `employmentType` (HOURLY | SALARIED_EXEMPT), `hireDate`, `terminationDate` (nullable), `departmentId`, `payScheduleId`, `standardMinutesPerDay` (Int, default **480**), `isActive`, `needsReview` (set on anyone created from the directory, or whose directory account was disabled; saving the record clears it), `approvalDigest` (approval email as one daily digest instead of one each).
+**Employee** — `email` (unique), `firstName`, `lastName`, `role` (EMPLOYEE | ADMIN | FINANCE — finance reads and exports reports and changes nothing), `employmentType` (HOURLY | SALARIED_EXEMPT), `hireDate`, `terminationDate` (nullable), `departmentId`, `payScheduleId`, `standardMinutesPerDay` (Int, default **480**), `isActive`, `needsReview` (set on anyone created from the directory, or whose directory account was disabled; saving the record clears it), `approvalDigest` (approval email as one daily digest instead of one each), `employeeTypeId` (nullable; the employee type they were created from, kept as a label).
 
 > `standardMinutesPerDay` is what makes "half a day" meaningful per person. A 480-minute employee at a 240-minute increment requests in half-days; a part-timer on 240 requests in whole days.
 
@@ -75,6 +75,12 @@ See `docs/AUTH-PLAN.md` for how these fit together.
 > `firstYearGrant` encodes what a new hire gets. `FULL_AFTER_WAITING` with `waitingPeriodDays = 120` is our rule: the complete annual allotment, not a prorated slice, once the waiting period ends. `PRORATE` gives a share based on the remainder of the year. See "Lump grant date" below.
 
 **EmployeeLeavePolicy** — `employeeId`, `leavePolicyId`, `annualMinutesOverride` (nullable), `effectiveFrom`, `effectiveTo` (nullable). Unique on `(employeeId, leavePolicyId, effectiveFrom)`. At most one active policy per leave type per date — enforced in the service layer.
+
+**EmployeeType** — `name` (unique), `employmentType` (HOURLY | SALARIED_EXEMPT), `isActive`, `sortOrder`. A starting profile for new employees — Pastor, Director, Associate, or whatever the organization calls its staff; the names are an administrator's.
+
+**EmployeeTypePolicy** — `employeeTypeId` (cascade), `leaveTypeId`, `leavePolicyId` (restrict). Unique on `(employeeTypeId, leaveTypeId)`: at most one default policy per leave type, and a leave type with no row gets none. That the policy belongs to `leaveTypeId`, and that the type's employment type may hold it, are checked in the service layer.
+
+> A type is a **pre-fill template**, not a live link. Creating an employee from one writes ordinary `EmployeeLeavePolicy` rows (from the hire date, open-ended, no override) and sets `Employee.employeeTypeId`; nothing reads the type again. Editing the type, or changing an employee's type label, changes no one's assignments — so a type never has to be reconciled against the people made from it.
 
 **RolloverRule** — org-wide, one per leave type (`leaveTypeId` unique).
 

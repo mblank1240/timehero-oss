@@ -11,6 +11,7 @@ import type { Prisma, PrismaClient } from '@prisma/client'
 
 import type { EmployeeInput, LeaveTypeInput, PolicyInput } from '@/lib/accrual/types'
 import { db } from '@/lib/db'
+import { accruableBy } from '@/lib/employees/assignments'
 
 type Client = PrismaClient | Prisma.TransactionClient
 
@@ -184,24 +185,11 @@ function toPolicyInForce(
 }
 
 /**
- * Rule 4 in CLAUDE.md in its general form. `EXEMPT_ONLY` exists because the
- * FLSA bars private employers from giving non-exempt staff comp time in lieu
- * of overtime pay; `HOURLY_ONLY` is its mirror for anything the church ever
- * decides only hourly staff receive.
+ * Rule 4 in CLAUDE.md. It lives with the other assignment rules in
+ * `lib/employees/assignments.ts`, which is pure; re-exported for the callers
+ * that already read it from here.
  */
-export function accruableBy(
-  basis: 'ALL' | 'HOURLY_ONLY' | 'EXEMPT_ONLY',
-  employmentType: 'HOURLY' | 'SALARIED_EXEMPT',
-): boolean {
-  switch (basis) {
-    case 'ALL':
-      return true
-    case 'HOURLY_ONLY':
-      return employmentType === 'HOURLY'
-    case 'EXEMPT_ONLY':
-      return employmentType === 'SALARIED_EXEMPT'
-  }
-}
+export { accruableBy }
 
 /** Every leave type that can hold a balance, for the rollover and expiry jobs. */
 export async function rolloverConfiguration() {

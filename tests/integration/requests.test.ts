@@ -136,7 +136,15 @@ beforeAll(async () => {
   )
 
   const type = await db.leaveType.create({
-    data: { code: `${RUN}-PTO`, name: `${RUN} PTO`, countsTowardRollover: true },
+    data: {
+      code: `${RUN}-PTO`,
+      name: `${RUN} PTO`,
+      countsTowardRollover: true,
+      // Everything carries. The dates below reach up to ~80 working days
+      // ahead; from October on that crosses the benefit year, and with no
+      // rule the balance would be forfeited at the boundary.
+      rolloverRule: { create: { capBasis: 'UNLIMITED' } },
+    },
   })
   leaveTypeId = type.id
 })

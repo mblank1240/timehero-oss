@@ -71,7 +71,8 @@ rows can be added to the file and run again.
 | `email` | yes | Their sign-in address |
 | `first_name`, `last_name` | yes | |
 | `role` | | `EMPLOYEE` (default), `ADMIN` or `FINANCE`. Make yourself `ADMIN` |
-| `employment_type` | yes | `HOURLY` or `SALARIED_EXEMPT` (`exempt` is accepted). Comp time is exempt staff only |
+| `employment_type` | yes | `HOURLY` or `SALARIED_EXEMPT` (`exempt` is accepted). Comp time is exempt staff only. May be blank on a row with a `type`, which then supplies it |
+| `type` | | An employee type's name (any case), from Administration → Employee types. On a row with no `policies` they are put on the type's policies; a policy their employment type cannot hold is skipped and listed in the report |
 | `hire_date` | yes | `YYYY-MM-DD`. Drives the waiting period |
 | `termination_date` | | For someone who has left but still has a balance to settle |
 | `department` | | Created if it doesn't exist |

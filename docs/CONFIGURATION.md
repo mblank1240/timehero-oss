@@ -56,12 +56,13 @@ organization:
 | Benefit year | Calendar year |
 | Leave requests | Half-day increments (240 minutes); a smaller remainder may be spent |
 | Timesheets | 15-minute increments |
-| PTO | Standard: 10 days. 5+ Years: 15 days. Both after a 90-day waiting period; up to 5 of the employee's own days roll over |
+| PTO | Standard: 10 days. 5+ Years: 15 days. Senior Staff: 20 days. All after a 90-day waiting period; up to 5 of the employee's own days roll over |
 | Sick | 10 days from the hire date; up to 60 of the employee's own days roll over |
 | Comp time | Earned by exempt staff from approved overtime at 1.0×; doesn't roll over, except what is earned in December, which stays usable through February |
 | Pay calendar | Biweekly, paid 5 days after the period ends |
 | Holidays | Eight US holidays for 2026 |
 | Email | None — push and the in-app list only, until an administrator sets a sending address |
+| Employee types | Pastor (salaried, PTO Senior Staff), Director (salaried, PTO 5+ Years), Associate (hourly, PTO Standard); all on Sick Standard |
 
 ## The file, section by section
 
@@ -162,3 +163,29 @@ time usable through February:
 ```
 
 February 28 means the end of February: in a leap year it resolves to the 29th.
+
+### `employeeTypes`
+
+Optional. Starting profiles for new employees: choosing one when adding an
+employee fills in the employment type and puts them on the type's policies
+from their hire date. After that the employee's policies are their own.
+
+```json
+{
+  "name": "Director", "employmentType": "SALARIED_EXEMPT",
+  "policies": { "PTO": "5+ Years", "SICK": "Standard" }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `name` | What your organization calls this kind of staff. Unique |
+| `employmentType` | `HOURLY` or `SALARIED_EXEMPT` — what the new-employee form starts at |
+| `policies` | Leave type `code` to the `name` of one of its policies in this file. A leave type left out gets no policy. A leave type the employment type cannot accrue is refused — no comp policy on an hourly type |
+
+On a re-run a type is created, with its policies, only when no type of that
+name exists. One that does is left exactly as an administrator may have edited
+it under Administration → Employee types, defaults included; one renamed in
+the app is created again under the file's name. Nothing here changes an
+existing employee's policies.
+

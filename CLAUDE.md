@@ -44,6 +44,10 @@ lib/audit.ts     writeAudit + diff
 lib/accrual/     the engine — pure functions, no Prisma, heavily tested; comp.ts
                  decides what an approved overtime log banks
 lib/ledger/      reading and writing ledger rows; resolving who accrues what
+lib/employees/   employee records; assignments.ts holds the pure policy-assignment
+                 rules (who may hold a leave type, overlapping dates)
+lib/employee-types/  employee types: the pure plan of a new hire's policies, the
+                 service and actions — a pre-fill only, never re-applied
 lib/jobs/        the seven scheduled jobs, their shared secret and their JobRun log —
                  send-notifications is hourly, the rest daily or weekly; health.ts
                  is missed-run detection. Jobs stamp ledger rows with their jobRunId

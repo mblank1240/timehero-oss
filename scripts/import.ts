@@ -97,6 +97,10 @@ async function main() {
     )
     for (const m of report.missingBalances) console.log(`  ${m.email.padEnd(36)}${m.leaveType}`)
   }
+  if (report.policiesSkipped.length > 0) {
+    console.log('\nEmployee type policies not assigned (assign them in the app if they are wanted):')
+    for (const s of report.policiesSkipped) console.log(`  ${s.email.padEnd(36)}${s.message}`)
+  }
 }
 
 function printErrors(errors: RowError[]) {

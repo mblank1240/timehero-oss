@@ -101,6 +101,14 @@
       "firstYearGrant": "FULL_AFTER_WAITING"
     },
     {
+      "leaveType": "PTO",
+      "name": "Senior Staff",
+      "method": "ANNUAL_LUMP",
+      "annualMinutes": 9600,
+      "waitingPeriodDays": 90,
+      "firstYearGrant": "FULL_AFTER_WAITING"
+    },
+    {
       "leaveType": "SICK",
       "name": "Standard",
       "method": "ANNUAL_LUMP",
@@ -138,6 +146,23 @@
       "usableUntilDay": 28,
       "usableUntilYearOffset": 1,
       "capBasis": "UNLIMITED"
+    }
+  ],
+  "employeeTypes": [
+    {
+      "name": "Pastor",
+      "employmentType": "SALARIED_EXEMPT",
+      "policies": { "PTO": "Senior Staff", "SICK": "Standard" }
+    },
+    {
+      "name": "Director",
+      "employmentType": "SALARIED_EXEMPT",
+      "policies": { "PTO": "5+ Years", "SICK": "Standard" }
+    },
+    {
+      "name": "Associate",
+      "employmentType": "HOURLY",
+      "policies": { "PTO": "Standard", "SICK": "Standard" }
     }
   ]
 }
