@@ -2,7 +2,12 @@
 # walkthrough:
 #
 #   cp .env.docker.example .env.docker      # then fill it in
-#   docker compose up -d                    # database, migrations, app, jobs
+#   docker compose up -d --build            # database, migrations, app, jobs
+#
+# --build builds the images from this checkout. To run a published release
+# instead (TIMEHERO_VERSION in .env, e.g. 0.1.0; default latest):
+#
+#   docker compose --profile tools pull && docker compose up -d --no-build
 #   docker compose run --rm tools npm run setup -- --config prisma/config/example.json ...
 #
 # The app listens on port 3000. Put it behind a reverse proxy that terminates
@@ -35,7 +40,7 @@ services:
   # Applies any pending migrations, then exits. The app waits for it.
   migrate:
     build: { context: ., target: tools }
-    image: timehero-tools
+    image: ${TIMEHERO_IMAGE:-ghcr.io/mblank1240/timehero}-tools:${TIMEHERO_VERSION:-latest}
     env_file: .env.docker
     command: ['npx', 'prisma', 'migrate', 'deploy']
     logging: *logging
@@ -44,7 +49,7 @@ services:
 
   app:
     build: { context: ., target: app }
-    image: timehero
+    image: ${TIMEHERO_IMAGE:-ghcr.io/mblank1240/timehero}:${TIMEHERO_VERSION:-latest}
     restart: unless-stopped
     env_file: .env.docker
     ports:
@@ -56,7 +61,7 @@ services:
   # Posts to the job routes on the timetable in docker/scheduler.mjs.
   jobs:
     build: { context: ., target: app }
-    image: timehero
+    image: ${TIMEHERO_IMAGE:-ghcr.io/mblank1240/timehero}:${TIMEHERO_VERSION:-latest}
     restart: unless-stopped
     env_file: .env.docker
     command: ['node', 'docker/scheduler.mjs']
@@ -71,7 +76,7 @@ services:
   # `docker compose run --rm tools <command>`: setup, the import, Prisma.
   tools:
     build: { context: ., target: tools }
-    image: timehero-tools
+    image: ${TIMEHERO_IMAGE:-ghcr.io/mblank1240/timehero}-tools:${TIMEHERO_VERSION:-latest}
     env_file: .env.docker
     profiles: [tools]
     volumes:

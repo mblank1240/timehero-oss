@@ -46,6 +46,22 @@ docker compose up -d --build
 docker compose logs -f app       # until it reports Ready
 ```
 
+That builds the images from your checkout. To run a published release instead,
+pull its images — `ghcr.io/mblank1240/timehero` and `timehero-tools`, for
+linux/amd64 and arm64 — and start without building:
+
+```bash
+echo TIMEHERO_VERSION=0.1.0 >> .env     # or leave unset for the latest release
+docker compose --profile tools pull
+docker compose up -d --no-build
+```
+
+`TIMEHERO_VERSION` (and `TIMEHERO_IMAGE`, for images published from a fork)
+are read by Compose from your shell or from `.env` beside
+`docker-compose.yml`, not from `.env.docker`. Use the checkout of the same
+release (`git checkout v0.1.0`), so `docker-compose.yml` and the
+configuration examples match the images.
+
 ## 3. Set up the organization
 
 Copy `prisma/config/example.json` to `prisma/config/<org>.json` and edit it —
@@ -91,6 +107,10 @@ time.example.org {
 git pull
 docker compose up -d --build     # migrate runs before the new app starts
 ```
+
+On published images, check out the new release, set `TIMEHERO_VERSION` to it,
+then `docker compose --profile tools pull && docker compose up -d --no-build`.
+Read its release notes first: they say when an upgrade needs anything more.
 
 ## Backups
 
