@@ -114,3 +114,55 @@ the daily slot does not skip that day. If it was down for longer, rerun a
 missed day from **Admin → Jobs**: every job takes the date it acts on and never
 grants anything twice. `/api/health/jobs` answers 503
 when a job is overdue, for an uptime monitor to poll.
+
+## Without Docker
+
+Any host that runs Node 22 and can reach PostgreSQL 17 or later will do: a
+Linux server under systemd, or a platform such as Render, Railway or Fly.io.
+What the Docker setup does for you, you then do yourself:
+
+1. **Configure** the same environment variables as above, in whatever way the
+   host takes them. `NODE_ENV=production` must be set when the server runs.
+2. **Build** Next's standalone server. `prisma.config.ts` reads `DATABASE_URL`
+   during the install and build, but nothing connects, so a placeholder is fine:
+
+   ```bash
+   export DATABASE_URL=postgresql://build@localhost:5432/build
+   export AUTH_SECRET=build-only-placeholder-not-used-at-runtime
+   npm ci
+   npm run build
+   cp -r public .next/standalone/public
+   cp -r .next/static .next/standalone/.next/static
+   ```
+
+3. **Migrate before every start** of a new release, with the real
+   `DATABASE_URL`: `npx prisma migrate deploy`. On a platform this is its
+   release or pre-deploy command. Each migration is safe for the release
+   before it, so the old version may keep serving while it runs.
+4. **Start** the server: `node .next/standalone/server.js`, with `PORT` (default
+   3000) and `HOSTNAME=0.0.0.0` if the host routes to it from outside. It
+   checks its configuration as it starts and exits, saying what is wrong,
+   rather than serve with a bad one. `/api/health` is its health check.
+5. **Set up the organization** once, from a checkout with the real
+   `DATABASE_URL`: `npm run setup -- …` exactly as in step 3 above, minus
+   `docker compose run --rm tools`.
+6. **Serve it over HTTPS** — a platform does this for you; on your own server,
+   the reverse proxy above.
+7. **Schedule the jobs.** Something must call them, with `JOBS_SECRET`:
+
+   ```cron
+   # The daily batch, in this order: expiry is settled before the rollover
+   # reads balances, and the rollover before the new year's accrual.
+   0 7 * * *  for j in expire-lots benefit-year-rollover accrue-pay-period create-timesheets sync-directory; do curl -fsS -X POST -H "Authorization: Bearer $JOBS_SECRET" "$APP_URL/api/jobs/$j"; done
+   15 * * * * curl -fsS -X POST -H "Authorization: Bearer $JOBS_SECRET" "$APP_URL/api/jobs/send-notifications"
+   0 6 * * 0  curl -fsS -X POST -H "Authorization: Bearer $JOBS_SECRET" "$APP_URL/api/jobs/generate-pay-periods"
+   ```
+
+   Times are UTC, matching `docker/scheduler.mjs` and
+   `.github/workflows/jobs.yml`; each job acts on the organization's own date
+   whatever the hour. A platform's cron feature, or the GitHub Actions
+   workflow in `.github/workflows/jobs.yml` (it needs only `APP_BASE_URL` and
+   `JOBS_SECRET`), works as well as crontab.
+
+Backups and upgrades follow the same pattern as above: `pg_dump` against your
+database, and for an upgrade build, migrate, then restart.

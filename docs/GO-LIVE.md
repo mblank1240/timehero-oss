@@ -1,8 +1,14 @@
 # Going live
 
 The order of events from an empty production database to the first pay
-period closed in TimeHero. Azure itself is `docs/AZURE-SETUP.md`. This page
-picks up after its first deploy.
+period closed in TimeHero. It picks up once the app is running: on Azure after
+the first deploy (`docs/AZURE-SETUP.md`), with Docker after `docker compose up`
+(`docs/SELF-HOSTING.md`).
+
+The steps are the same either way; only how you run the commands differs.
+Where they differ, each step says so. With Docker, every `npx`/`npm` command
+here runs in the tools container — `docker compose run --rm tools <command>` —
+with its input files in `./import`, which that container mounts.
 
 **Done when:** a pay period closes correctly in production with no manual
 intervention.
@@ -11,8 +17,9 @@ intervention.
 
 Three things have to be settled first. None of them is code:
 
-- [ ] **The Entra app registration** (`docs/ENTRA-SETUP.md`). Without a way to
-      sign in, the app does not start in production.
+- [ ] **A way for staff to sign in**: Microsoft 365 (`docs/ENTRA-SETUP.md`),
+      Google, or emailed links over SMTP (`docs/AUTH-PLAN.md`). Without one,
+      the app does not start in production.
 - [ ] **The pay schedule anchor date**: the first day of a real pay period.
       Every period is generated from it, and once timesheets exist it cannot
       be corrected. It goes in `SEED_PAY_ANCHOR_DATE` below (`docs/CONFIGURATION.md`).
@@ -40,7 +47,11 @@ NODE_ENV=production SEED_CONFIGURATION_ONLY=true SEED_CONFIG=prisma/config/<org>
   SEED_PAY_ANCHOR_DATE=<YYYY-MM-DD> npm run db:seed
 ```
 
-Keep the firewall rule open for steps 2 and 4, and delete it when you're done:
+**With Docker** there is no firewall to open, and `npm run setup` (step 3 of
+`docs/SELF-HOSTING.md`) has already loaded the configuration and created the
+first administrator. Skip to step 2.
+
+On Azure, keep the firewall rule open for steps 2 and 4, and delete it when you're done:
 
 ```bash
 az postgres flexible-server firewall-rule delete -g rg-timehero -n <postgresServerName> \
@@ -55,6 +66,10 @@ policies, department, pay schedule and approval chain. Templates are in
 
 ```bash
 npx tsx --tsconfig tsconfig.json scripts/import.ts --employees employees.csv
+
+# With Docker:
+docker compose run --rm tools npx tsx --tsconfig tsconfig.json scripts/import.ts \
+  --employees import/employees.csv
 ```
 
 **It writes nothing without `--commit`.** The run happens inside a
@@ -89,10 +104,13 @@ the configuration file), or none if you send no email.
 
 ## 3. Turn on the scheduled jobs
 
-The scheduled jobs start as soon as GitHub has `APP_BASE_URL` and
-`JOBS_SECRET` (step 4 of `docs/AZURE-SETUP.md`). From then on they run
+On Azure, the scheduled jobs start as soon as GitHub has `APP_BASE_URL` and
+`JOBS_SECRET` (step 4 of `docs/AZURE-SETUP.md`). With Docker, the `jobs`
+service has been running them since `docker compose up`; anywhere else, see
+"Scheduled jobs" in the README. From then on they run
 on their own every day. **Admin → Jobs** shows what ran, and an "overdue"
-notice appears there, and an alert email goes out, if any job stops.
+notice appears there if any job stops (on Azure an alert email goes out too;
+with Docker, point a monitor at `/api/health/jobs`).
 
 Lump grants written before the balances go in do no harm. The import
 counts them (see below).
@@ -104,6 +122,10 @@ the cutover date**, and import it:
 
 ```bash
 npx tsx --tsconfig tsconfig.json scripts/import.ts --balances balances.csv --as-of <cutover>
+
+# With Docker:
+docker compose run --rm tools npx tsx --tsconfig tsconfig.json scripts/import.ts \
+  --balances import/balances.csv --as-of <cutover>
 ```
 
 Dry run first, as before. The report shows each balance split into the
