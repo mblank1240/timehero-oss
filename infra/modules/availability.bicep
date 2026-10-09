@@ -7,15 +7,21 @@ param location string
 param insightsId string
 param url string
 param frequencySeconds int
+// How many of the locations below run the test. The alert needs two failing at once.
+@minValue(2)
+@maxValue(4)
+param locationCount int
 param description string
 param actionGroupId string
 
-var locations = [
+// Taken in this order, so two locations are still a coast apart.
+var allLocations = [
   'us-va-ash-azr' // East US
-  'us-il-ch1-azr' // North Central US
-  'us-tx-sn1-azr' // South Central US
   'us-ca-sjc-azr' // West US
+  'us-tx-sn1-azr' // South Central US
+  'us-il-ch1-azr' // North Central US
 ]
+var locations = take(allLocations, locationCount)
 
 resource test 'Microsoft.Insights/webtests@2022-06-15' = {
   name: name
